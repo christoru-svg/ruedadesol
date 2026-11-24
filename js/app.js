@@ -1,7 +1,8 @@
 /* Rueda de Sol — suivi des élèves. Une seule page, rendue en JS sans dépendance. */
 'use strict';
 /* ---------- Référentiels ---------- */
-const APP_VERSION='1.0.0';
+const APP_VERSION='1.3.0';
+const SCRIPT_BASE=document.currentScript?document.currentScript.src:location.href;
 const TODAY = new Date(); TODAY.setHours(12,0,0,0);
 const isoDay=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 const TODAY_ISO=isoDay(TODAY);
@@ -203,7 +204,7 @@ function nextTraining(strictlyAfter){
   for(let k=strictlyAfter?1:0;k<=7;k++){const x=new Date(TODAY);x.setDate(d.getDate()+k);if(settings.days.includes(x.getDay()))return isoDay(x)}
   return TODAY_ISO;
 }
-function snapshot(){return {app:'rueda-de-sol',v:1,savedAt:new Date().toISOString(),students,archived,sessions,skills:SKILLS,settings,sample}}
+function snapshot(){return {app:'rueda-de-sol',v:1,savedAt:new Date().toISOString(),localSavedAt,students,archived,sessions,skills:SKILLS,settings,sample}}
 function applyState(st){
   students.splice(0,students.length,...(st.students||[]));
   archived.splice(0,archived.length,...(st.archived||[]));
@@ -214,13 +215,127 @@ function applyState(st){
   settings=Object.assign({days:[2,4],time:'19:30',lastExport:null},st.settings||{});
   sample=!!st.sample;
 }
-let saveT=null;
-function saveNow(){
+/* Enregistrement local : seulement quand les données ont changé (pas à chaque changement d'écran). */
+let saveT=null, lastSavedJson=null, localSavedAt=0, syncUid=null, sentPhotos={};
+const dataJson=()=>JSON.stringify({students,archived,sessions,skills:SKILLS,settings,sample});
+const saveMeta=()=>idbSet('meta',{localSavedAt,syncUid,sentPhotos}).catch(()=>{});
+function saveNow(opts={}){
   clearTimeout(saveT); saveT=null; if(!loaded) return Promise.resolve();
-  return idbSet('state',JSON.parse(JSON.stringify(snapshot()))).catch(err=>{console.error(err);toast("L'enregistrement sur ce téléphone a échoué. Exporte une sauvegarde depuis les réglages.")});
+  const j=dataJson(); if(j===lastSavedJson&&!opts.force) return Promise.resolve();
+  lastSavedJson=j; if(!opts.keepStamp) localSavedAt=Date.now();
+  return idbSet('state',JSON.parse(JSON.stringify(snapshot()))).then(saveMeta).then(()=>{if(!opts.keepStamp) schedulePush()})
+    .catch(err=>{console.error(err);toast("L'enregistrement sur ce téléphone a échoué. Exporte une sauvegarde depuis les réglages.")});
 }
 function scheduleSave(){clearTimeout(saveT);saveT=setTimeout(saveNow,300)}
-document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'&&saveT)saveNow()});
+
+/* ---------- Compte en ligne (Firebase, facultatif) ---------- */
+const cloud={enabled:!!window.FIREBASE_CONFIG,mod:null,user:null,authKnown:false,status:'off',lastSync:null,error:''};
+let pushT=null;
+const refreshCloud=()=>{updateGate(); if(view.name==='settings'&&!gateMode)keep()};
+async function cloudStart(){
+  if(!cloud.enabled) return;
+  try{ cloud.mod=await import(new URL('sync.js?v='+APP_VERSION,SCRIPT_BASE).href); }
+  catch(e){ console.warn(e); cloud.status='offline'; refreshCloud(); return; }
+  cloud.status='off';
+  cloud.mod.start(window.FIREBASE_CONFIG,u=>{cloud.user=u; cloud.authKnown=true; if(u) cloudConnect(); else {cloud.status='off'; refreshCloud()}});
+  cloud.mod.redirectError().then(x=>{ if(x&&!AUTH_SILENT.includes(x.code)) toast(AUTH_ERR[x.code]||'La connexion Google a échoué. Réessaie.') });
+}
+function cloudFail(e){
+  console.error(e);
+  if(!navigator.onLine){cloud.status='offline';return}
+  cloud.status='error';
+  cloud.error=e&&e.message==='trop-gros'?"les données dépassent la taille maximale d'une copie en ligne":e&&e.code==='permission-denied'?"accès refusé (vérifie les règles Firestore)":"la copie en ligne n'a pas pu être mise à jour";
+}
+async function cloudPull(){
+  const st=await cloud.mod.pull(cloud.user.uid);
+  applyState(st); localSavedAt=st.localSavedAt||Date.now(); syncUid=cloud.user.uid;
+  sentPhotos={}; [...students,...archived].forEach(x=>{if(x.photo)sentPhotos[x.id]=x.photo.length+':'+x.photo.slice(-40)});
+  await saveNow({force:true,keepStamp:true});
+  cloud.status='ok'; cloud.lastSync=Date.now(); render();
+}
+async function cloudPush(){
+  if(!cloud.user||!cloud.mod) return;
+  clearTimeout(pushT); pushT=null; cloud.status='syncing'; refreshCloud();
+  try{ await cloud.mod.push(cloud.user.uid,JSON.parse(JSON.stringify(snapshot())),sentPhotos); syncUid=cloud.user.uid; await saveMeta(); cloud.status='ok'; cloud.lastSync=Date.now(); }
+  catch(e){ cloudFail(e); }
+  refreshCloud();
+}
+function schedulePush(){ if(!cloud.user) return; clearTimeout(pushT); pushT=setTimeout(cloudPush,2000); }
+async function cloudConnect(){
+  if(!cloud.user||!cloud.mod) return;
+  cloud.status='syncing'; refreshCloud();
+  try{
+    const remote=await cloud.mod.remoteStamp(cloud.user.uid);
+    const hasLocal=students.length||archived.length||sessions.length;
+    if(!remote){ await cloudPush(); }
+    else if(syncUid!==cloud.user.uid){ if(hasLocal){ mergeSheet(remote); cloud.status='off'; } else await cloudPull(); }
+    else if((remote.localSavedAt||0)>localSavedAt){ await cloudPull(); toast('Données mises à jour depuis la copie en ligne'); }
+    else if((remote.localSavedAt||0)<localSavedAt){ await cloudPush(); }
+    else { cloud.status='ok'; cloud.lastSync=Date.now(); }
+  }catch(e){ cloudFail(e); }
+  refreshCloud();
+}
+function mergeSheet(remote){
+  const when=remote.localSavedAt?new Date(remote.localSavedAt).toLocaleString('fr-FR',{day:'numeric',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit'}):'date inconnue';
+  openSheet(`<form class="sheet" id="mergeform" aria-label="Choisir les données à garder">
+    <h2>Quelles données garder ?</h2>
+    <p style="margin:0">Une copie en ligne existe déjà (${esc(when)}, ${remote.students||0} élèves, ${remote.sessions||0} séances).</p>
+    <p style="margin:0">Ce téléphone a aussi des données : ${students.length+archived.length} élèves, ${sessions.length} séances.</p>
+    <p class="muted" style="margin:0">Les données non gardées seront remplacées. Exporte d'abord une sauvegarde si tu as un doute.</p>
+    <div class="btns"><button type="button" class="btn" data-act="keeplocal">Garder ce téléphone</button><button type="button" class="btn primary" data-act="keepremote">Récupérer la copie en ligne</button></div>
+  </form>`);
+}
+const AUTH_ERR={'auth/invalid-credential':'E-mail ou mot de passe incorrect.','auth/wrong-password':'E-mail ou mot de passe incorrect.','auth/user-not-found':'E-mail ou mot de passe incorrect.','auth/invalid-email':"Cette adresse e-mail n'est pas valide.",'auth/too-many-requests':'Trop de tentatives. Réessaie dans quelques minutes.','auth/network-request-failed':'Pas de réseau. Réessaie une fois connecté·e.','auth/unauthorized-domain':"Ce site n'est pas dans les domaines autorisés de Firebase (Authentication › Paramètres).",'auth/operation-not-allowed':"Ce mode de connexion n'est pas activé dans Firebase.",'auth/admin-restricted-operation':"Aucun compte n'existe encore pour cette adresse, et la création de compte est désactivée dans Firebase.",'auth/email-already-in-use':'Un compte existe déjà avec cette adresse : utilise « Se connecter », ou Google si tu l\'as créé avec Google.','auth/weak-password':'Mot de passe trop court : 6 caractères minimum.','auth/account-exists-with-different-credential':'Un compte existe déjà avec cette adresse : connecte-toi avec ton e-mail et ton mot de passe.'};
+const AUTH_SILENT=['auth/popup-closed-by-user','auth/cancelled-popup-request','auth/user-cancelled'];
+const G_LOGO='<svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 8 3l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 8 3l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>';
+function accountCard(){
+  const head='<section class="card"><h2>Compte en ligne</h2>';
+  if(!cloud.enabled) return head+`<span class="muted" style="font-size:.875rem">La copie en ligne n'est pas encore configurée pour cette appli.</span></section>`;
+  if(!cloud.user) return head+`<span class="muted" style="font-size:.875rem">${cloud.status==='offline'?'Pas de réseau : la connexion au compte sera possible au retour du réseau. Tes données restent sur ce téléphone.':'Chargement…'}</span></section>`;
+  const st={syncing:'Synchronisation en cours…',ok:`Copie en ligne à jour${cloud.lastSync?' ('+new Date(cloud.lastSync).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})+')':''}.`,offline:'Hors ligne : la copie en ligne sera mise à jour au retour du réseau.',error:`Échec : ${cloud.error}.`,off:'En attente de ton choix.'}[cloud.status]||'';
+  return head+`<span>Connecté·e : <b>${esc(cloud.user.email||'')}</b></span>
+    <span class="row" style="gap:8px;font-size:.875rem"><span class="pill ${cloud.status==='ok'?'ok':cloud.status==='error'?'red':'warn'}">${cloud.status==='ok'?'À jour':cloud.status==='error'?'Échec':cloud.status==='syncing'?'En cours':'En attente'}</span><span class="muted">${esc(st)}</span></span>
+    <div class="btns"><button class="btn" data-act="logout">Se déconnecter</button><button class="btn primary" data-act="syncnow">Synchroniser maintenant</button></div></section>`;
+}
+
+/* Écran de connexion : couvre l'appli tant que personne n'est connecté.
+   Pas d'écran si la copie en ligne n'est pas configurée, ou si Firebase n'a pas pu se charger (hors ligne) :
+   dans ce cas, l'appli s'ouvre avec les données du téléphone. */
+let gateMode=null;
+function gateWanted(){
+  if(!cloud.enabled||cloud.user||cloud.status==='offline') return null;
+  return cloud.authKnown?'login':'loading';
+}
+function gateHtml(mode){
+  const brand=`<div class="gate-logos"><img src="icons/logo-groupe.png" alt="Logo Capoeira Rueda de Sol" width="88" height="88"><img src="icons/logo-asso.png" alt="Logo association Tao Te Chia" width="64" height="64"></div>
+    <h1 tabindex="-1">Rueda de Sol</h1><p class="muted" style="margin:0">Suivi des élèves</p>`;
+  if(mode==='loading') return brand+`<p class="muted" role="status" style="margin-top:24px">Connexion…</p>`;
+  return brand+`<div class="gate-box stack">
+    <p style="margin:0">Connecte-toi pour retrouver tes élèves. Une copie de tes données est gardée en ligne, pour ne rien perdre si tu vides le cache ou changes de téléphone.</p>
+    <button type="button" class="btn gbtn" data-act="google">${G_LOGO}Continuer avec Google</button>
+    <p id="acc-gerr" role="alert" style="margin:0;color:var(--pill-red);font-size:.875rem"></p>
+    <details class="mailopt"><summary>Utiliser plutôt un e-mail et un mot de passe</summary>
+    <form id="loginform" class="stack" style="gap:10px;margin-top:12px">
+      <div class="field"><label for="acc-email">E-mail</label><input class="input" type="email" id="acc-email" autocomplete="username" required></div>
+      <div class="field"><label for="acc-pw">Mot de passe</label><input class="input" type="password" id="acc-pw" autocomplete="current-password" minlength="6" aria-describedby="acc-pwhint" required>
+        <span id="acc-pwhint" class="muted" style="font-size:.8125rem">6 caractères minimum.</span></div>
+      <button type="button" class="btn ghost" style="align-self:flex-start" data-act="resetpw">Mot de passe oublié</button>
+      <p id="acc-err" role="alert" style="margin:0;color:var(--pill-red);font-size:.875rem"></p>
+      <div class="btns"><button class="btn" type="submit" value="signup">Créer un compte</button><button class="btn primary" type="submit" value="login">Se connecter</button></div>
+    </form></details></div>`;
+}
+function updateGate(){
+  const mode=gateWanted(); if(mode===gateMode) return;
+  const was=gateMode; gateMode=mode;
+  const g=document.getElementById('gate');
+  document.body.classList.toggle('gated',!!mode);
+  g.hidden=!mode;
+  if(mode){ g.innerHTML=gateHtml(mode); document.title='Connexion · Rueda de Sol'; if(mode==='login') g.querySelector('h1').focus({preventScroll:true}); }
+  else { g.innerHTML=''; if(was) render('#view h1'); }
+}
+
+window.addEventListener('online',()=>{ if(cloud.user) cloudConnect(); else if(cloud.enabled&&!cloud.mod) cloudStart(); });
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'){ if(saveT) saveNow(); if(pushT) cloudPush(); }});
 async function exportBackup(){
   const name=`rueda-de-sol-${TODAY_ISO}.json`;
   const file=new File([JSON.stringify(snapshot(),null,1)],name,{type:'application/json'});
@@ -471,9 +586,10 @@ function settingsPage(){
     <div class="field"><label for="set-time">Heure de début</label><input class="input" type="time" id="set-time" data-set="time" value="${settings.time}" style="max-width:9rem"></div>
     <span class="muted" style="font-size:.875rem">Sert à proposer la date et l'heure des nouvelles séances.</span>
   </section>
+  ${accountCard()}
   <section class="card">
     <h2>Sauvegarde</h2>
-    <p style="margin:0">Tes données sont enregistrées sur ce téléphone uniquement. Si tu le perds ou changes de téléphone, seule une sauvegarde exportée permet de les retrouver.</p>
+    <p style="margin:0">${cloud.user?'Une copie en ligne est faite automatiquement. Un export de temps en temps reste une bonne double sécurité.':'Sans compte en ligne, tes données sont enregistrées sur ce téléphone uniquement. Si tu le perds ou vides le cache, seule une sauvegarde exportée permet de les retrouver.'}</p>
     <span class="muted" style="font-size:.875rem">Dernière sauvegarde exportée : ${settings.lastExport?fmtL(settings.lastExport):'jamais'}.</span>
     <div class="btns"><button class="btn" data-act="import">Importer</button><button class="btn primary" data-act="export">Exporter une sauvegarde</button></div>
   </section>
@@ -628,7 +744,7 @@ function render(focusSel){
   document.getElementById('view').innerHTML=V[view.name]();
   document.getElementById('tabs').innerHTML=TABS.map(([id,l,ic])=>`<button class="${tab===id?'on':''}" data-act="go" data-to="${id}" aria-current="${tab===id?'page':'false'}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ic}</svg>${l}</button>`).join('');
   const h1=document.querySelector('#view h1'); if(h1) h1.tabIndex=-1;
-  document.title=(h1?h1.textContent.trim():'Accueil')+' · Rueda de Sol';
+  if(!gateMode) document.title=(h1?h1.textContent.trim():'Accueil')+' · Rueda de Sol';
   document.getElementById('demo-badge').hidden=!sample;
   scheduleSave();
   if(prev){const el=document.querySelector(prev);if(el)el.focus({preventScroll:true})}
@@ -649,9 +765,18 @@ document.addEventListener('click',e=>{
     case 'sample':{if(students.length||archived.length)break; const d=buildSample(); students.push(...d.students); archived.push(...d.archived); sessions.push(...d.sessions); sample=true; toast('Exemples chargés'); go('home'); break}
     case 'export': exportBackup(); break;
     case 'import': pickBackup(); break;
+    case 'keeplocal': closeSheet(false); cloudPush(); toast('La copie en ligne est remplacée par ce téléphone'); break;
+    case 'keepremote': closeSheet(false); cloud.status='syncing'; refreshCloud(); cloudPull().then(()=>{toast('Copie en ligne récupérée');go('home')}).catch(e=>{cloudFail(e);refreshCloud()}); break;
+    case 'logout': if(cloud.mod) cloud.mod.signOut().then(()=>toast('Déconnecté·e. Les données restent sur ce téléphone.')); break;
+    case 'syncnow': cloudConnect(); break;
+    case 'google':{const err=document.getElementById('acc-gerr'); if(err) err.textContent='';
+      cloud.mod.signInGoogle().catch(x=>{ if(AUTH_SILENT.includes(x.code)) return; const e2=document.getElementById('acc-gerr'); if(e2) e2.textContent=AUTH_ERR[x.code]||'La connexion Google a échoué. Réessaie.'}); break}
+    case 'resetpw':{const em=(document.getElementById('acc-email')||{}).value; if(!em){toast("Saisis d'abord ton e-mail.");break}
+      cloud.mod.resetPassword(em).then(()=>toast('E-mail de réinitialisation envoyé')).catch(()=>toast("L'e-mail n'a pas pu être envoyé. Vérifie l'adresse.")); break}
     case 'wipe':{
       if(!d.step){t.dataset.step='1';t.textContent='Confirmer : tout effacer';t.classList.remove('ghost');t.classList.add('danger');break}
-      applyState({}); toast('Toutes les données ont été effacées'); go('home'); break}
+      if(cloud.user&&cloud.mod){clearTimeout(pushT);pushT=null;cloud.mod.signOut()} syncUid=null; sentPhotos={};
+      applyState({}); toast(cloud.enabled?'Données de ce téléphone effacées. La copie en ligne est conservée.':'Toutes les données ont été effacées'); go('home'); break}
     case 'newtoday':{const id='n'+Date.now();sessions.push({id,date:TODAY_ISO,time:settings.time,title:'Séance du jour',done:false,present:[],blocks:[{p:'phys',title:'Échauffement',min:15,skills:[]},{p:'mus',title:'Musique',min:30,skills:[]}]});draft=null;go('edit',{id});tab='sessions';render();break}
     case 'photo': {const st=byId(d.id); pickPhoto(url=>{st.photo=url; toast('Photo enregistrée'); keep();}); break}
     case 'rmphoto': {const st=byId(d.id); delete st.photo; closeSheet(); toast('Photo retirée'); keep(); break}
@@ -698,6 +823,11 @@ document.addEventListener('change',e=>{const t=e.target;
   if(t.dataset.set==='time'){settings.time=t.value||'19:30';scheduleSave();return}if(t.dataset.act==='bp'){const b=draft.blocks[t.dataset.i];b.p=t.value;b.skills=[];keep()}});
 document.addEventListener('submit',e=>{
   e.preventDefault();
+  if(e.target.id==='loginform'){
+    const em=document.getElementById('acc-email').value.trim(), pw=document.getElementById('acc-pw').value, err=document.getElementById('acc-err');
+    if(!cloud.mod) return; err.textContent='';
+    const signup=e.submitter&&e.submitter.value==='signup';
+    (signup?cloud.mod.signUp(em,pw):cloud.mod.signIn(em,pw)).catch(x=>{err.textContent=AUTH_ERR[x.code]||(signup?"Le compte n'a pas pu être créé. Réessaie.":'La connexion a échoué. Réessaie.')}); return}
   if(e.target.id==='importform'){ if(!pendingImport) return; applyState(pendingImport); pendingImport=null; closeSheet(false); toast('Sauvegarde importée'); go('home'); return}
   if(e.target.id==='stform'){
     const st=byId(e.target.dataset.id), ap=document.getElementById('s-ap').value.trim(), nom=document.getElementById('s-nom').value.trim();
@@ -733,10 +863,13 @@ document.addEventListener('keydown',e=>{
 });
 /* ---------- Démarrage ---------- */
 (async function init(){
-  try{ const st=await idbGet('state'); if(st) applyState(st); }
+  try{ const st=await idbGet('state'); if(st) applyState(st);
+    const m=await idbGet('meta'); if(m){ localSavedAt=m.localSavedAt||0; syncUid=m.syncUid||null; sentPhotos=m.sentPhotos||{}; }
+    lastSavedJson=dataJson(); }
   catch(e){ console.error(e); toast("Les données de ce téléphone n'ont pas pu être lues."); }
   loaded=true;
   if(navigator.storage&&navigator.storage.persist) navigator.storage.persist().catch(()=>{});
-  render();
+  updateGate(); render();
   if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(e=>console.warn('Service worker',e));
+  cloudStart();
 })();
