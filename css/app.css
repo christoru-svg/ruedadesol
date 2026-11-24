@@ -196,3 +196,10 @@ body.gated .app,body.gated .tabs{display:none}
 .gate-logos{display:flex;align-items:center;gap:16px;margin-bottom:16px}
 .gate-box{margin-top:28px;width:100%;text-align:left;gap:14px}
 .gate-logos img:first-child{border-radius:14px}
+
+/* Séances : conseils et blocs fixes */
+.adv-row{display:flex;align-items:flex-start;gap:10px;padding:12px 0;border-top:1px solid var(--line)}
+.adv-row:first-child{border-top:0;padding-top:4px}
+.adv-row .dot{margin-top:6px;flex:none}
+.adv-row .btn{flex:none}
+.block.fixed{background:var(--sunk)}

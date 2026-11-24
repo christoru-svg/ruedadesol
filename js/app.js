@@ -1,7 +1,7 @@
 /* Rueda de Sol — suivi des élèves. Une seule page, rendue en JS sans dépendance. */
 'use strict';
 /* ---------- Référentiels ---------- */
-const APP_VERSION='1.3.0';
+const APP_VERSION='1.4.0';
 const SCRIPT_BASE=document.currentScript?document.currentScript.src:location.href;
 const TODAY = new Date(); TODAY.setHours(12,0,0,0);
 const isoDay=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
@@ -114,28 +114,22 @@ function buildSample(){
     lvlHist.sort((x,y)=>x.date.localeCompare(y.date));
     return {id:'e'+i,apelido,nom,arrivee,corda,levels,hist,assid,color:AV[i%AV.length],notes:'',contribs,since,lvlHist};
   });
-  // Séances : mardi et jeudi, 8 dernières semaines
-  const TEMPLATES = [
-    {title:'Ginga, esquivas et Série 1',blocks:[['phys','Échauffement articulaire',15,['soupl','cardio']],['mouv','Ginga et esquivas en miroir',25,['ginga','esq']],['jeu','Série 1 en binômes',30,['s1']],['jeu','Roda Regional',20,['regional','roda','palmas']],['mus','Musique : corridos et pandeiro',30,['coro','corridos','pandeiro']]]},
-    {title:'Angola : chamada et toque',blocks:[['phys','Échauffement au sol',15,['soupl','gainage']],['jeu','Jogo de Angola, rythme lent',25,['angola','malicia']],['jeu','Chamada',20,['chamada']],['cult','Mestre Pastinha',10,['mestres']],['jeu','Roda Angola',20,['roda','angola']],['mus','Musique : toque Angola au berimbau',30,['gunga','t_angola']]]},
-    {title:'Coups de pied tournants',blocks:[['phys','Cardio et gainage',15,['cardio','gainage']],['mouv','Armada, queixada, meia-lua de compasso',30,['armada','queix','mlc']],['jeu','Série 2',25,['s2']],['jeu','Roda Regional',20,['regional']],['mus','Musique : São Bento Grande',30,['t_sbg','medio']]]},
-    {title:'Aú, rolê et Série 3',blocks:[['phys','Échauffement',15,['soupl']],['mouv','Aú et rolê',20,['au','role']],['mouv','Bananeira et macaco (facultatif)',10,['bananeira','macaco']],['jeu','Série 3',25,['s3']],['jeu','Roda Regional',20,['regional','roda']],['mus','Musique : atabaque et agogô',30,['atabaque','agogo']]]},
-  ];
+  // Séances : lundi (tatami) et mercredi (miroir), 8 dernières semaines
+  const PLANS={1:[[['acro',20],['equil',15],['coups',20],['roda',15]],[['acro',20],['chao',15],['angola',20],['roda',15]],[['acro',20],['floreio',15],['series',20],['roda',15]]],
+               3:[[['combo',20],['series',20],['roda',20],['cult',10]],[['miroir',15],['combo',20],['series',20],['roda',15]],[['combo',20],['series',25],['roda',25]]]};
+  const build=plan=>[mkBlock(WARM),...plan.map(([k,m])=>mkBlock(LIBK[k],m)),mkBlock(MUSIC)];
   let sid=0; const ses=[];
-  for(let w=8;w>=1;w--){
-    for(const dow of [2,4]){ // mar, jeu
-      const d=new Date(TODAY); d.setDate(d.getDate()-w*7+(dow-2));
-      if(d>=TODAY) continue;
-      const t=TEMPLATES[sid%TEMPLATES.length];
+  for(let w=8;w>=0;w--){
+    for(const dow of [1,3]){
+      const d=new Date(TODAY); d.setDate(d.getDate()-w*7-((d.getDay()+6)%7)+(dow-1));
+      if(isoDay(d)>=TODAY_ISO) continue;
+      const plan=PLANS[dow][sid%3];
       const present=sts.filter(s=>new Date(s.arrivee)<=d && (s.apelido!=='Tatu'||w>4) && R()<(s.apelido==='Tatu'?.8:s.assid)).map(s=>s.id);
-      ses.push({id:'s'+(sid++),date:isoDay(d),time:settings.time,title:t.title,blocks:t.blocks.map(b=>({p:b[0],title:b[1],min:b[2],skills:[...b[3]]})),present,done:true});
+      ses.push({id:'s'+(sid++),date:isoDay(d),time:settings.time,blocks:build(plan),present,done:true});
     }
   }
-  ses.push({id:'x-today',date:TODAY_ISO,time:settings.time,title:'Benguela et jeu au sol',done:false,present:[],
-    blocks:[{p:'phys',title:'Échauffement et mobilité',min:15,skills:['soupl','cardio']},{p:'mouv',title:'Esquivas basses et rolê',min:25,skills:['esq','role','cocor']},
-    {p:'jeu',title:'Série 2 en binômes',min:20,skills:['s2']},{p:'cult',title:'Les toques de Mestre Bimba',min:10,skills:['hist','mestres']},
-    {p:'jeu',title:'Roda Regional',min:20,skills:['regional','roda','palmas','coro']},{p:'mus',title:'Musique : toque Benguela, gunga et médio',min:30,skills:['t_benguela','gunga','medio']}]});
-  ses.push({id:'x-next',date:nextTraining(true),time:settings.time,title:'Séance à préparer',done:false,present:[],blocks:[]});
+  ses.push({id:'x-today',date:TODAY_ISO,time:settings.time,done:false,present:[],blocks:build([['miroir',15],['combo',20],['series',20],['roda',15]])});
+  ses.push({id:'x-next',date:nextTraining(true),time:settings.time,done:false,present:[],blocks:fixedBlocks()});
   const st=n=>sts.find(x=>x.apelido===n);
   Object.assign(st('Tatu'),{status:'pause',statusNote:'Blessure au genou, retour prévu en janvier'});
   Object.assign(st('Vento'),{status:'inactif',statusNote:'A déménagé à Lyon'});
@@ -195,8 +189,86 @@ function balance(daysBack=30){
   return tot;
 }
 
+/* ---------- Séances : blocs modulables et conseils ---------- */
+// Chaque séance : 20 min d'échauffement et renforcement, 1h10 de blocs au choix, 30 min de musique.
+const FOCUS={
+  tatami:{name:'Tatami',long:'Tatami : acrobaties et jeu au sol',must:['acro']},
+  miroir:{name:'Miroir et parquet',long:'Miroir et parquet : combos à deux, séries et roda',must:['combo','series','roda']},
+};
+const WARM={k:'warm',p:'phys',title:'Échauffement et renforcement musculaire',min:20,skills:['cardio','gainage','soupl'],fixed:'start'};
+const MUSIC={k:'mus',p:'mus',title:'Musique',min:30,skills:[],fixed:'end'};
+const LIB=[
+  {k:'acro',p:'mouv',title:'Acrobaties au sol : aú, rolê, negativa',min:20,skills:['au','role','negativa'],where:'tatami'},
+  {k:'equil',p:'mouv',title:'Bananeira et équilibres (facultatif)',min:15,skills:['bananeira','au'],where:'tatami'},
+  {k:'floreio',p:'mouv',title:'Macaco et floreios (facultatif)',min:15,skills:['macaco','au','role'],where:'tatami'},
+  {k:'chao',p:'mouv',title:'Jeu au sol et transitions',min:15,skills:['negativa','role','cocor','esq','rast'],where:'tatami'},
+  {k:'combo',p:'jeu',title:'Combos à deux : attaque et esquive',min:20,skills:['esq','armada','queix','mlc','martelo','bencao','cab','rast'],where:'miroir'},
+  {k:'series',p:'jeu',title:'Séries du groupe',min:20,skills:['s1','s2','s3','s4'],where:'miroir'},
+  {k:'miroir',p:'mouv',title:'Technique au miroir : ginga et coups de pied',min:15,skills:['ginga','mlf','armada','bencao','queix'],where:'miroir'},
+  {k:'roda',p:'jeu',title:'Roda',min:20,skills:['roda','palmas','regional','angola','coro'],where:'miroir'},
+  {k:'angola',p:'jeu',title:'Jogo de Angola : chamada et malícia',min:20,skills:['angola','chamada','malicia']},
+  {k:'coups',p:'mouv',title:'Coups de pied tournants',min:20,skills:['armada','queix','mlc','martelo']},
+  {k:'esquivas',p:'mouv',title:'Ginga, esquivas et déplacements',min:15,skills:['ginga','esq','cocor']},
+  {k:'cult',p:'cult',title:'Culture : histoire, mestres, rituels',min:10,skills:['hist','mestres','rituels','port']},
+  {k:'soupl',p:'phys',title:'Souplesse et étirements',min:10,skills:['soupl']},
+  {k:'libre',p:'mouv',title:'Bloc libre',min:15,skills:[]},
+];
+const LIBK=Object.fromEntries([WARM,MUSIC,...LIB].map(b=>[b.k,b]));
+const weekday=date=>new Date(date+'T12:00:00').toLocaleDateString('fr-FR',{weekday:'long'});
+const cap=t=>t.charAt(0).toUpperCase()+t.slice(1);
+const dayFocus=date=>(settings.focus||{})[new Date(date+'T12:00:00').getDay()]||'';
+const pool=()=>students.filter(s=>s.status!=='pause');
+// nombre d'élèves pour qui la compétence est au programme de leur corde et pas encore acquise
+function need(sk){const s=S[sk]; if(!s) return 0; return pool().filter(st=>s.c<=st.corda&&(st.levels[sk]||0)<2).length}
+function sinceWorked(sk,before){const l=done().filter(se=>se.date<before&&se.blocks.some(b=>b.skills.includes(sk))).pop(); return l?days(new Date(l.date+'T12:00:00'),new Date(before+'T12:00:00')):null}
+function mkBlock(t,min){
+  const b={k:t.k,p:t.p,title:t.title,min:min||t.min,skills:t.skills.filter(x=>S[x])}; if(t.fixed) b.fixed=t.fixed;
+  if(t.k==='series'){const s=b.skills.filter(x=>need(x)>0); if(s.length) b.skills=s;}
+  return b;
+}
+const fixedBlocks=()=>[mkBlock(WARM),mkBlock(MUSIC)];
+/* Conseils : quels blocs ajouter, et pourquoi.
+   Score = besoin du groupe (compétences pas encore acquises, pondérées par le temps depuis le dernier travail)
+         + orientation du jour (tatami ou miroir) + rattrapage d'un pilier délaissé ce mois-ci. */
+function advice(d){
+  const n=pool().length, f=dayFocus(d.date), have=new Set(d.blocks.map(b=>b.k));
+  const bal=balance(), tot=Object.values(bal).reduce((a,b)=>a+b,0);
+  return LIB.filter(t=>t.k!=='libre'&&!have.has(t.k)).map(t=>{
+    let best=null, score=0; const why=[];
+    t.skills.forEach(sk=>{ if(!S[sk]||!n) return; const nd=need(sk), since=sinceWorked(sk,d.date);
+      const v=(nd/n)*(0.4+0.6*(since==null?1:Math.min(1,since/21)))*(S[sk].opt?0.5:1);
+      score+=v; if(nd&&(!best||v>best.v)) best={sk,v,nd,since}; });
+    score/=Math.max(1,Math.sqrt(t.skills.length));
+    const fit=!!(f&&t.where===f); if(fit) score+=1;
+    else if(t.where==='tatami') score*=0.5;
+    if(tot&&bal[t.p]/tot<.08){ score+=.4; why.push(`${P[t.p].name} : moins de 8 % du temps de cours ce mois-ci`); }
+    if(best) why.push(`${S[best.sk].name} : ${best.nd} élève${best.nd>1?'s':''} sur ${n} ne l'${best.nd>1?'ont':'a'} pas encore acquis${best.since==null?', jamais travaillé':best.since>=14?`, pas travaillé depuis ${best.since} jours`:''}`);
+    return {t,score,why,fit};
+  }).sort((a,b)=>b.score-a.score);
+}
+/* Séance complète proposée : échauffement, blocs du jour, blocs conseillés, roda, musique. 1h10 de blocs. */
+function proposePlan(d){
+  const f=dayFocus(d.date), mid=[]; let left=70;
+  const add=k=>{const t=LIBK[k]; if(!t||mid.some(b=>b.k===k)) return; const m=Math.min(t.min,left); if(m<10) return; mid.push(mkBlock(t,m)); left-=m};
+  ((FOCUS[f]&&FOCUS[f].must)||[]).forEach(add);
+  const ranked=advice({date:d.date,blocks:mid});
+  if(f==='tatami'){const x=ranked.find(a=>a.t.where==='tatami'&&!mid.some(b=>b.k===a.t.k)); if(x) add(x.t.k);}
+  const roda=!mid.some(b=>b.k==='roda'); if(roda) left-=15;
+  for(const a of ranked){ if(left<10) break; if(a.t.k!=='roda') add(a.t.k); }
+  if(roda){ left+=15; add('roda'); }
+  mid.sort((a,b)=>(a.k==='roda')-(b.k==='roda'));
+  if(left>0&&mid.length) mid[mid.length-1].min+=left;
+  d.blocks=[mkBlock(WARM),...mid,mkBlock(MUSIC)];
+}
+/* Une séance n'a pas de titre : on la résume par ses blocs principaux. */
+function sessionLabel(s){
+  const mid=s.blocks.filter((b,i)=>!b.fixed&&b.p!=='mus'&&!(i===0&&b.p==='phys'));
+  if(!mid.length) return 'Séance à préparer';
+  return mid.slice(0,3).map(b=>b.title.split(/\s*[:(]/)[0].trim()).join(' · ');
+}
+
 /* ---------- Réglages et sauvegarde ---------- */
-let settings={days:[2,4],time:'19:30',lastExport:null};
+let settings={days:[1,3],time:'19:30',lastExport:null,focus:{1:'tatami',3:'miroir'}};
 let sample=false, loaded=false;
 const DAYS=[[1,'Lun'],[2,'Mar'],[3,'Mer'],[4,'Jeu'],[5,'Ven'],[6,'Sam'],[0,'Dim']];
 function nextTraining(strictlyAfter){
@@ -212,7 +284,10 @@ function applyState(st){
   SKILLS.splice(0,SKILLS.length,...(st.skills&&st.skills.length?st.skills:JSON.parse(JSON.stringify(DEFAULT_SKILLS))));
   Object.keys(S).forEach(k=>delete S[k]); SKILLS.forEach(s=>S[s.id]=s);
   [...students,...archived].forEach(x=>{x.levels=x.levels||{};x.since=x.since||{};x.lvlHist=x.lvlHist||[];x.contribs=x.contribs||[];x.hist=x.hist||[];SKILLS.forEach(s=>{if(x.levels[s.id]==null)x.levels[s.id]=0})});
-  settings=Object.assign({days:[2,4],time:'19:30',lastExport:null},st.settings||{});
+  const old=st.settings||{};
+  settings=Object.assign({days:[1,3],time:'19:30',lastExport:null},old);
+  // anciens réglages par défaut (mardi et jeudi) : passage au lundi (tatami) et mercredi (miroir)
+  if(!old.focus){ if(String(old.days)==='2,4') settings.days=[1,3]; settings.focus={1:'tatami',3:'miroir'}; }
   sample=!!st.sample;
 }
 /* Enregistrement local : seulement quand les données ont changé (pas à chaque changement d'écran). */
@@ -448,7 +523,7 @@ function welcome(){
 function noSession(nxt){
   return `<section class="card">
     <span class="eyebrow">Aujourd'hui</span><h2>Pas de séance prévue</h2>
-    ${nxt?`<span class="muted">Prochaine : ${esc(nxt.title)}, ${fmtL(nxt.date)}</span>`:''}
+    ${nxt?`<span class="muted">Prochaine : ${fmtL(nxt.date)}, ${esc(sessionLabel(nxt))}</span>`:''}
     <div class="btns">${nxt?`<button class="btn" data-act="edit" data-id="${nxt.id}">Voir la prochaine</button>`:''}<button class="btn primary" data-act="newtoday">Créer une séance aujourd'hui</button></div>
   </section>`;
 }
@@ -465,7 +540,7 @@ function home(){
   ${t?`  <details class="card hero acc" id="hero-acc"${heroOpen?' open':''}>
     <summary><div class="stack" style="gap:6px;flex:1;min-width:0">
       <div class="row between"><span class="eyebrow">${t.done?`Appel fait · ${t.present.length} présents`:`Séance du jour · ${t.time}`}</span><span class="eyebrow num">${fmtDur(t.blocks)}</span></div>
-      <h2 style="font-size:1.375rem">${esc(t.title)}</h2></div><span class="chev" aria-hidden="true"></span></summary>
+      <h2 style="font-size:1.375rem">${esc(sessionLabel(t))}</h2></div><span class="chev" aria-hidden="true"></span></summary>
     <div class="stack" style="gap:4px;font-size:0.875rem">${t.blocks.map(b=>`<div class="row" style="gap:8px"><span class="num muted" style="min-width:3.75rem;white-space:nowrap">${b.min} min</span><span>${esc(b.title)}</span></div>`).join('')}</div>
     <div class="btns">${t.done?`<button class="btn" data-act="appel" data-id="${t.id}">Corriger l'appel</button><button class="btn primary" data-act="evalgo" data-id="${t.id}">Évaluer (facultatif)</button>`:`<button class="btn" data-act="edit" data-id="${t.id}">Modifier</button><button class="btn primary" data-act="appel" data-id="${t.id}">Faire l'appel</button>`}</div>
   </details>`:noSession(nxt)}
@@ -583,8 +658,10 @@ function settingsPage(){
     <h2>Entraînements</h2>
     <fieldset style="border:0;padding:0;margin:0;display:flex;flex-direction:column;gap:6px"><legend class="eyebrow" style="padding:0;margin-bottom:6px">Jours</legend>
       <div class="days">${DAYS.map(([d,l])=>`<label><input type="checkbox" data-set="day" value="${d}"${settings.days.includes(d)?' checked':''}>${l}</label>`).join('')}</div></fieldset>
+    ${DAYS.filter(([d])=>settings.days.includes(d)).map(([d])=>`<div class="field"><label for="foc-${d}">${cap(['dimanche','lundi','mardi','mercredi','jeudi','vendredi','samedi'][d])} : lieu et axe de travail</label>
+      <select class="input" id="foc-${d}" data-set="focus" data-day="${d}"><option value="">Pas d'orientation</option>${Object.entries(FOCUS).map(([k,v])=>`<option value="${k}"${(settings.focus||{})[d]===k?' selected':''}>${esc(v.long)}</option>`).join('')}</select></div>`).join('')}
     <div class="field"><label for="set-time">Heure de début</label><input class="input" type="time" id="set-time" data-set="time" value="${settings.time}" style="max-width:9rem"></div>
-    <span class="muted" style="font-size:.875rem">Sert à proposer la date et l'heure des nouvelles séances.</span>
+    <span class="muted" style="font-size:.875rem">Sert à proposer la date, l'heure et les blocs des nouvelles séances.</span>
   </section>
   ${accountCard()}
   <section class="card">
@@ -604,7 +681,7 @@ function sessionsList(){
   const up=sessions.filter(s=>!s.done).sort((a,b)=>a.date.localeCompare(b.date));
   const past=done().slice().reverse();
   const row=s=>{const tot=s.blocks.reduce((a,b)=>a+b.min,0);return `<button class="li" data-act="${s.done?'edit':'edit'}" data-id="${s.id}"><div class="grow stack" style="gap:6px">
-    <div class="row between"><span class="title">${esc(s.title)}</span><span class="sub num">${fmt(s.date)}</span></div>
+    <div class="row between"><span class="title">${esc(sessionLabel(s))}</span><span class="sub num">${weekday(s.date).slice(0,3)}. ${fmt(s.date)}</span></div>
     ${s.blocks.length?pillarBar(s.blocks):'<span class="sub">Aucun bloc pour l\'instant</span>'}
     <span class="sub num">${fmtDur(s.blocks)}${s.done?` · ${s.present.length} présents`:''}</span></div></button>`};
   return `
@@ -617,24 +694,47 @@ function sessionsList(){
 let draft=null;
 function editor(){
   if(!draft||draft.id!==view.id) draft=JSON.parse(JSON.stringify(sess(view.id)));
-  const tot=draft.blocks.reduce((a,b)=>a+b.min,0);
+  const f=dayFocus(draft.date), hasMid=draft.blocks.some(b=>!b.fixed);
+  const adv=draft.done?[]:advice(draft).slice(0,3);
+  const chips=b=>{const ids=[...new Set([...((LIBK[b.k]||{}).skills||[]),...b.skills,...SKILLS.filter(s=>s.p===b.p).map(s=>s.id)])].filter(id=>S[id]);
+    return ids.map(id=>`<button class="chip${b.skills.includes(id)?' on':''}" data-act="bsk" data-i="${draft.blocks.indexOf(b)}" data-sk="${id}" aria-pressed="${b.skills.includes(id)}">${esc(S[id].name)}</button>`).join('')};
+  const firstMovable=draft.blocks[0]&&draft.blocks[0].fixed==='start'?1:0;
   return `
   <button class="back" data-act="go" data-to="sessions">‹ Séances</button>
-  <div class="field"><label for="ttl">Titre de la séance</label><input class="input" id="ttl" value="${esc(draft.title)}" data-act="ttl"></div>
+  <div class="stack" style="gap:4px"><span class="eyebrow">${fmtL(draft.date)}</span><h1>${draft.done?'Séance passée':'Préparer la séance'}</h1>
+    <span class="row wrap" style="gap:6px;font-size:.875rem">${f?`<span class="pill neutral">${esc(FOCUS[f].long)}</span>`:`<span class="muted">Pas d'orientation pour ce jour (à régler dans Réglages).</span>`}</span></div>
   <div class="row" style="gap:10px"><div class="field" style="flex:1"><label for="dt">Date</label><input class="input" type="date" id="dt" value="${draft.date}" data-act="dt"></div>
     <div class="field" style="width:7.5rem"><label for="tm">Heure</label><input class="input" type="time" id="tm" value="${draft.time}" data-act="tm"></div></div>
-  <div class="card" style="gap:8px"><div class="row between"><span class="eyebrow">Répartition</span><span class="num" style="font-weight:700">${fmtDur(draft.blocks)}</span></div>${draft.blocks.length?pillarBar(draft.blocks):''}${legend()}${(()=>{const d=split(draft.blocks);return d.cours===90&&d.mus===30?'':`<span style="font-size:0.8125rem"><span class="pill warn">À ajuster</span> Prévu : 1h30 de cours et 30 min de musique (actuellement ${hm(d.cours)} et ${d.mus} min).</span>`})()}</div>
-  ${draft.blocks.map((b,i)=>`<div class="block">
-    <div class="block-head"><select class="input" style="width:auto;flex:none;color:${P[b.p].color};font-weight:700" data-act="bp" data-i="${i}" aria-label="Pilier" id="bp-${i}">${SPILL.map(p=>`<option value="${p.id}"${p.id===b.p?' selected':''}>${p.name}</option>`).join('')}</select>
+  ${draft.done?'':`<section class="card advice">
+    <h2>Que travailler ?</h2>
+    ${hasMid?'':`<p style="margin:0">${f==='tatami'?cap(weekday(draft.date))+', tatami : la séance met l\'accent sur le sol et les acrobaties (toujours facultatives).':f==='miroir'?'Miroir, parquet et souvent plus de monde : la séance met l\'accent sur les combos à deux, les séries et la roda.':''} Le reste dépend de ce que le groupe n'a pas encore acquis et de ce qui n'a pas été travaillé depuis longtemps.</p>
+      <div class="btns"><button class="btn primary" data-act="plan">Proposer une séance complète</button></div>`}
+    ${adv.length?`<span class="eyebrow">${hasMid?'Blocs conseillés':'Ou ajoute les blocs un par un'}</span>
+    <div class="stack" style="gap:0">${adv.map(a=>`<div class="adv-row"><i class="dot" style="background:${P[a.t.p].color}" aria-hidden="true"></i>
+      <div class="grow stack" style="gap:2px"><b>${esc(a.t.title)}</b>${a.fit?`<span><span class="pill ok">Idéal le ${weekday(draft.date)}</span></span>`:''}${a.why.length?'':`<span class="muted" style="font-size:.8125rem">Le groupe maîtrise déjà bien ces compétences.</span>`}${a.why.map(w=>`<span class="muted" style="font-size:.8125rem">${esc(w)}</span>`).join('')}</div>
+      <button class="btn" data-act="addlib" data-k="${a.t.k}" aria-label="Ajouter : ${esc(a.t.title)}">Ajouter</button></div>`).join('')}</div>`:''}
+  </section>`}
+  <div class="card" style="gap:8px"><div class="row between"><span class="eyebrow">Répartition</span><span class="num" style="font-weight:700">${fmtDur(draft.blocks)}</span></div>${draft.blocks.length?pillarBar(draft.blocks):''}${legend()}${(()=>{const d=split(draft.blocks);return d.cours===90&&d.mus===30?'':`<span style="font-size:0.8125rem"><span class="pill warn">À ajuster</span> Prévu : 1h30 de cours (dont 20 min d'échauffement) et 30 min de musique. Actuellement ${hm(d.cours)} et ${d.mus} min.</span>`})()}</div>
+  ${draft.blocks.map((b,i)=>`<div class="block${b.fixed?' fixed':''}">
+    <div class="block-head">${b.fixed?`<span class="eyebrow" style="color:${P[b.p].color}">${b.fixed==='start'?'Début de séance':'Fin de séance'}</span>`:`<select class="input" style="width:auto;flex:none;color:${P[b.p].color};font-weight:700" data-act="bp" data-i="${i}" aria-label="Pilier" id="bp-${i}">${SPILL.map(p=>`<option value="${p.id}"${p.id===b.p?' selected':''}>${p.name}</option>`).join('')}</select>`}
       <span style="flex:1"></span>
-      <button class="iconbtn" data-act="bup" data-i="${i}" aria-label="Monter" ${i?'':'disabled'}>↑</button>
-      <button class="iconbtn" data-act="bdel" data-i="${i}" aria-label="Supprimer le bloc">✕</button></div>
+      ${b.fixed?'':`<button class="iconbtn" data-act="bup" data-i="${i}" aria-label="Monter" ${i>firstMovable?'':'disabled'}>↑</button>
+      <button class="iconbtn" data-act="bdel" data-i="${i}" aria-label="Supprimer le bloc">✕</button>`}</div>
     <div class="row" style="gap:8px"><input class="input" id="bt-${i}" value="${esc(b.title)}" data-act="bt" data-i="${i}" aria-label="Titre du bloc" style="flex:1">
       <div class="stepper"><button data-act="bmin" data-i="${i}" data-d="-5" aria-label="Moins 5 minutes">−</button><span class="num">${b.min} min</span><button data-act="bmin" data-i="${i}" data-d="5" aria-label="Plus 5 minutes">+</button></div></div>
-    <div class="row wrap" style="gap:6px">${SKILLS.filter(s=>s.p===b.p).map(s=>`<button class="chip${b.skills.includes(s.id)?' on':''}" data-act="bsk" data-i="${i}" data-sk="${s.id}">${esc(s.name)}</button>`).join('')}</div>
+    <div class="row wrap" style="gap:6px">${chips(b)}</div>
   </div>`).join('')}
   <button class="btn" data-act="badd">+ Ajouter un bloc</button>
   <div class="btns" style="padding-top:6px"><button class="btn" data-act="leave" data-to="sessions">Annuler</button>${draft.done?`<button class="btn" data-act="appel" data-id="${draft.id}">Corriger l'appel</button><button class="btn" data-act="evalgo" data-id="${draft.id}">Évaluer</button>`:`<button class="btn" data-act="saveappel">Enregistrer et faire l'appel</button>`}<button class="btn primary" data-act="save">Enregistrer</button></div>`;
+}
+function libSheet(){
+  const f=dayFocus(draft.date), have=new Set(draft.blocks.map(b=>b.k));
+  const row=t=>`<button class="li" data-act="addlib" data-k="${t.k}"><i class="dot" style="background:${P[t.p].color}" aria-hidden="true"></i><div class="grow"><div class="title">${esc(t.title)}</div><div class="sub">${P[t.p].name} · ${t.min} min${have.has(t.k)?' · déjà dans la séance':''}</div></div></button>`;
+  const fl=f?LIB.filter(t=>t.where===f):[], other=LIB.filter(t=>!fl.includes(t));
+  openSheet(`<div class="sheet" aria-label="Ajouter un bloc"><h2>Ajouter un bloc</h2>
+    ${fl.length?`<span class="eyebrow">Conseillés ce jour-là : ${esc(FOCUS[f].name.toLowerCase())}</span><div class="list">${fl.map(row).join('')}</div>`:''}
+    <span class="eyebrow">${fl.length?'Autres blocs':'Blocs'}</span><div class="list">${other.map(row).join('')}</div>
+    <div class="btns"><button type="button" class="btn" data-act="close">Fermer</button></div></div>`);
 }
 
 let appelSel=null;
@@ -643,7 +743,7 @@ function appel(){
   const list=students.filter(x=>x.status!=='pause').sort((a,b)=>a.apelido.localeCompare(b.apelido)); const paused=students.filter(x=>x.status==='pause');
   return `
   <button class="back" data-act="go" data-to="home">‹ Accueil</button>
-  <div class="stack" style="gap:2px"><span class="eyebrow">Appel · ${fmt(s.date)} ${s.time}</span><h1>${esc(s.title)}</h1></div>
+  <div class="stack" style="gap:2px"><span class="eyebrow">Appel · ${weekday(s.date)} ${fmt(s.date)} ${s.time}</span><h1>${esc(sessionLabel(s))}</h1></div>
   <div class="row between"><span class="muted">Touche les élèves présents</span><b class="num">${appelSel.size} / ${list.length}</b></div>
   ${paused.length?`<span class="muted" style="font-size:0.8125rem">En pause, non affiché${paused.length>1?'s':''} : ${paused.map(x=>esc(x.apelido)).join(', ')}</span>`:''}
   ${list.length?'':'<span class="muted">Aucun élève actif. Ajoute des élèves depuis l\'onglet Élèves.</span>'}<div class="grid-tiles">${list.map(st=>`<button class="tile${appelSel.has(st.id)?' on':''}" data-act="tog" data-id="${st.id}" aria-pressed="${appelSel.has(st.id)}"><span class="check">✓</span>${avatar(st)}<span>${esc(st.apelido)}</span>${cordaEl(st.corda)}</button>`).join('')}</div>
@@ -716,7 +816,7 @@ function batizadoSheet(id){
 function leaveSheet(to){
   openSheet(`<form class="sheet" id="leaveform" aria-label="Modifications non enregistrées">
     <h2>Modifications non enregistrées</h2>
-    <p class="muted" style="margin:0">La séance « ${esc(draft.title)} » a des changements qui ne sont pas encore enregistrés.</p>
+    <p class="muted" style="margin:0">La séance du ${fmtL(draft.date)} a des changements qui ne sont pas encore enregistrés.</p>
     <div class="btns"><button type="button" class="btn" data-act="leave" data-to="${to}">Quitter sans enregistrer</button><button type="button" class="btn primary" data-act="saveleave" data-to="${to}">Enregistrer</button></div>
   </form>`);
 }
@@ -777,7 +877,7 @@ document.addEventListener('click',e=>{
       if(!d.step){t.dataset.step='1';t.textContent='Confirmer : tout effacer';t.classList.remove('ghost');t.classList.add('danger');break}
       if(cloud.user&&cloud.mod){clearTimeout(pushT);pushT=null;cloud.mod.signOut()} syncUid=null; sentPhotos={};
       applyState({}); toast(cloud.enabled?'Données de ce téléphone effacées. La copie en ligne est conservée.':'Toutes les données ont été effacées'); go('home'); break}
-    case 'newtoday':{const id='n'+Date.now();sessions.push({id,date:TODAY_ISO,time:settings.time,title:'Séance du jour',done:false,present:[],blocks:[{p:'phys',title:'Échauffement',min:15,skills:[]},{p:'mus',title:'Musique',min:30,skills:[]}]});draft=null;go('edit',{id});tab='sessions';render();break}
+    case 'newtoday':{const id='n'+Date.now();sessions.push({id,date:TODAY_ISO,time:settings.time,done:false,present:[],blocks:fixedBlocks()});draft=null;go('edit',{id});tab='sessions';render();break}
     case 'photo': {const st=byId(d.id); pickPhoto(url=>{st.photo=url; toast('Photo enregistrée'); keep();}); break}
     case 'rmphoto': {const st=byId(d.id); delete st.photo; closeSheet(); toast('Photo retirée'); keep(); break}
     case 'addphoto': pickPhoto(url=>{pendingPhoto=url; const p=document.getElementById('f-prev'); if(p) p.innerHTML=`<img class="avatar" src="${url}" alt="Aperçu de la photo">`; t.textContent='Changer la photo';}); break;
@@ -786,12 +886,15 @@ document.addEventListener('click',e=>{
     case 'contrib': contribSheet(d.id); break;
     case 'lvl':{const st=byId(d.st); setLevel(st,d.sk,+d.l); const y=window.scrollY; render(); window.scrollTo(0,y); break}
     case 'edit': draft=null; go('edit',{id:d.id}); tab='sessions'; render(); break;
-    case 'new':{const id='n'+Date.now();sessions.push({id,date:sessions.some(s=>s.date===TODAY_ISO)?nextTraining(true):nextTraining(false),time:settings.time,title:'Nouvelle séance',done:false,present:[],blocks:[{p:'phys',title:'Échauffement',min:15,skills:[]},{p:'mus',title:'Musique',min:30,skills:[]}]});draft=null;go('edit',{id});tab='sessions';render();break}
+    case 'new':{const id='n'+Date.now();sessions.push({id,date:sessions.some(s=>s.date===TODAY_ISO)?nextTraining(true):nextTraining(false),time:settings.time,done:false,present:[],blocks:fixedBlocks()});draft=null;go('edit',{id});tab='sessions';render();break}
     case 'bmin': draft.blocks[d.i].min=Math.max(5,draft.blocks[d.i].min+ +d.d); keep(); break;
     case 'bsk':{const b=draft.blocks[d.i];b.skills=b.skills.includes(d.sk)?b.skills.filter(x=>x!==d.sk):[...b.skills,d.sk];keep();break}
     case 'bdel': draft.blocks.splice(d.i,1); keep(); break;
     case 'bup':{const i=+d.i;[draft.blocks[i-1],draft.blocks[i]]=[draft.blocks[i],draft.blocks[i-1]];keep();break}
-    case 'badd': draft.blocks.push({p:'mouv',title:'Nouveau bloc',min:15,skills:[]}); keep(); break;
+    case 'badd': libSheet(); break;
+    case 'addlib':{const t=LIBK[d.k]; if(!t||!draft) break; const b=mkBlock(t); let at=draft.blocks.findIndex(x=>x.fixed==='end'); if(at<0) at=draft.blocks.length;
+      draft.blocks.splice(at,0,b); closeSheet(false); keep(); toast(`Ajouté : ${t.title}`); break}
+    case 'plan': proposePlan(draft); keep(); toast('Séance proposée : ajuste-la si besoin'); break;
     case 'save': case 'saveappel':{const i=sessions.findIndex(s=>s.id===draft.id);sessions[i]=draft;const id=draft.id;draft=null;
       if(a==='saveappel'){appelSel=null;go('appel',{id});tab='home';render()}else{go('sessions');toast('Séance enregistrée')};break}
     case 'appel': appelSel=null; go('appel',{id:d.id}); break;
@@ -819,7 +922,8 @@ document.addEventListener('input',e=>{
   if(a==='notes') scheduleSave();
 });
 document.addEventListener('change',e=>{const t=e.target;
-  if(t.dataset.set==='day'){const v=+t.value;settings.days=t.checked?[...new Set([...settings.days,v])]:settings.days.filter(x=>x!==v);scheduleSave();return}
+  if(t.dataset.set==='day'){const v=+t.value;settings.days=t.checked?[...new Set([...settings.days,v])]:settings.days.filter(x=>x!==v);keep();return}
+  if(t.dataset.set==='focus'){settings.focus=Object.assign({},settings.focus,{[t.dataset.day]:t.value});scheduleSave();return}
   if(t.dataset.set==='time'){settings.time=t.value||'19:30';scheduleSave();return}if(t.dataset.act==='bp'){const b=draft.blocks[t.dataset.i];b.p=t.value;b.skills=[];keep()}});
 document.addEventListener('submit',e=>{
   e.preventDefault();
