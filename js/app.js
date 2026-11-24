@@ -1,0 +1,742 @@
+/* Rueda de Sol — suivi des élèves. Une seule page, rendue en JS sans dépendance. */
+'use strict';
+/* ---------- Référentiels ---------- */
+const APP_VERSION='1.0.0';
+const TODAY = new Date(); TODAY.setHours(12,0,0,0);
+const isoDay=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+const TODAY_ISO=isoDay(TODAY);
+const PILLARS = [
+  {id:'mouv', name:'Mouvements', color:'var(--p-mouv)'},
+  {id:'jeu',  name:'Jeu & roda', color:'var(--p-jeu)'},
+  {id:'mus',  name:'Musique',    color:'var(--p-mus)'},
+  {id:'cult', name:'Culture',    color:'var(--p-cult)'},
+  {id:'phys', name:'Physique',   color:'var(--p-phys)'},
+  {id:'contrib', name:'Contribution', color:'var(--p-contrib)', session:false},
+];
+const SPILL = PILLARS.filter(p=>p.session!==false); // piliers travaillés en séance
+const P = Object.fromEntries(PILLARS.map(p=>[p.id,p]));
+const LEVELS = ['Découverte','En cours','Acquis','Maîtrisé'];
+const SKILLS = [
+  // c = corde pendant laquelle on travaille la compétence (0 = débutant sans corde, 1 = corde blanche…)
+  ['mouv','ginga','Ginga',0],['mouv','esq','Esquivas (lateral, baixa)',0],['mouv','cocor','Cocorinha',0],['mouv','negativa','Negativa',0],
+  ['mouv','mlf','Meia-lua de frente',0],['mouv','au','Aú',0],
+  ['mouv','bencao','Bênção',1],['mouv','armada','Armada',1],['mouv','queix','Queixada',1],['mouv','role','Rolê',1],
+  ['mouv','martelo','Martelo',2],['mouv','mlc','Meia-lua de compasso',2],['mouv','cab','Cabeçada',2],['mouv','bananeira','Bananeira (équilibre)',2,1],
+  ['mouv','rast','Rasteira',3],['mouv','macaco','Macaco',4,1],
+  ['jeu','palmas','Battre des mains en rythme dans la roda',0],['jeu','roda','Entrer et sortir de la roda',0],
+  ['jeu','s1','Série 1 du groupe',1],['jeu','regional','Jogo de Regional',1],
+  ['jeu','s2','Série 2 du groupe',2],['jeu','angola','Jogo de Angola',2],
+  ['jeu','s3','Série 3 du groupe',3],['jeu','chamada','Chamada (Angola)',3],
+  ['jeu','s4','Série 4 du groupe',4],['jeu','malicia','Malícia',4],
+  ['mus','coro','Répondre aux chœurs simples',0],
+  ['mus','pandeiro','Pandeiro',1],['mus','agogo','Agogô / reco-reco',1],['mus','t_sbg','Toque São Bento Grande',1],
+  ['mus','gunga','Berimbau gunga',2],['mus','atabaque','Atabaque',2],['mus','t_angola','Toque Angola',2],
+  ['mus','medio','Berimbau médio',3],['mus','t_benguela','Toque Benguela',3],['mus','corridos','Chanter un corrido en soliste',3],
+  ['mus','viola','Berimbau viola',4],['mus','t_iuna','Toque Iúna',5],['mus','ladainha','Chanter une ladainha',5],
+  ['cult','salut','Saluer et respecter le pied du berimbau',0],['cult','port','Vocabulaire portugais de base',0],
+  ['cult','hist','Histoire de la capoeira',1],['cult','mestres','Mestre Bimba et Mestre Pastinha',2],
+  ['cult','rituels','Rituels de la roda',3],['cult','trad','Comprendre les cantigas',4],
+  ['phys','soupl','Souplesse',0],['phys','gainage','Gainage',0],['phys','cardio','Endurance',1],
+  // Contribution au groupe : valable à tous les niveaux
+  ['contrib','accueil','Accueillir et héberger les visiteurs',0],['contrib','entraide','Accompagner les débutants',0],
+  ['contrib','orga','Aider à organiser (batizado, rodas, voyages)',0],['contrib','instru','Entretenir ou fabriquer les instruments',0],
+  ['contrib','transmission','Animer une partie du cours',0],['contrib','vie','Venir aux rodas et événements',0],
+].map(([p,id,name,c,opt])=>({p,id,name,c,opt:!!opt}));
+const DEFAULT_SKILLS = JSON.parse(JSON.stringify(SKILLS));
+const S = Object.fromEntries(SKILLS.map(s=>[s.id,s]));
+const LEVELS_C = ['Pas encore','Parfois','Souvent','Pilier'];
+const lvLabel=(id,l)=>(S[id]&&S[id].p==='contrib'?LEVELS_C:LEVELS)[l];
+
+const WHITE='#FFFFFF';
+const CORDAS = [
+  {name:'Sans corde', sub:'Débutant', colors:null},
+  {name:'Blanche', colors:[WHITE]},
+  {name:'Rouge', colors:['#D7322B']},
+  {name:'Orange', colors:['#F0832E']},
+  {name:'Jaune', colors:['#F2C230']},
+  {name:'Verte', colors:['#3D9A4F']},
+  {name:'Bleue', colors:['#2F6FC0']},
+  {name:'Indigo', colors:['#3B3A8F']},
+  {name:'Violette', sub:'Instructeur', colors:['#7A3E9D']},
+  {name:'Blanche aux pointes de couleurs', sub:'Professeur', colors:'multi'},
+  {name:'Blanche', sub:'Contre-mestre', colors:[WHITE]},
+  {name:'Sans corde', sub:'Mestre', colors:null},
+];
+/* Passage de corde : au moins 1 an dans sa corde. Le reste (référentiel, contribution, présence) sert de repère, sans bloquer. */
+const STEPS = {1:{},2:{},3:{},4:{},5:{},6:{},7:{},8:{}};
+
+/* ---------- Données d'exemple ---------- */
+function rng(seed){return()=>{seed|=0;seed=seed+0x6D2B79F5|0;let t=Math.imul(seed^seed>>>15,1|seed);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+const R = rng(7);
+const days=(a,b)=>Math.round((b-a)/864e5);
+const AV = ['#C0392B','#D35400','#1F7A8C','#7D5A2B','#5E7130','#8E3B5E','#3B5BA5','#B8860B'];
+// apelido, nom, arrivée, corde, assiduité, contribution (0-3), date de la dernière corde (batizados en juin)
+const PEOPLE = [
+  ['Pimenta','Léa Martin','2021-04-13',3,.9,1.6,'2024-06-15'],['Beija-flor','Hugo Bernard','2023-01-10',2,.85,1.2,'2025-06-14'],
+  ['Sabiá','Inès Petit','2024-01-16',1,.8,2.2,'2025-06-14'],['Coruja','Nathan Robert','2021-03-09',4,.75,2.4,'2025-06-14'],
+  ['Jabuti','Camille Durand','2025-02-11',1,.7,2.3,'2026-06-13'],['Tatu','Yanis Moreau','2023-02-07',2,.0,0.8,'2025-06-14'],
+  ['Brisa','Sarah Laurent','2025-10-07',0,.9,0.6,null],['Gato Preto','Théo Simon','2025-09-16',0,.65,1.8,null],
+  ['Formiga','Manon Michel','2020-10-06',3,.6,2.9,'2024-06-15'],['Sereia','Jade Lefèvre','2025-06-03',1,.85,1.0,'2026-06-13'],
+  ['Cigarra','Lucas Garcia','2026-10-06',0,.95,0.2,null],['Vento','Chloé Roux','2024-03-05',1,.55,1.4,'2025-06-14'],
+];
+/* Remplit l'appli avec 12 élèves et 8 semaines de séances fictives, pour essayer. */
+function buildSample(){
+  const CONTRIBS = {
+    Formiga:[['2026-06-13',"A organisé les repas du batizado"],['2026-10-18',"A hébergé deux capoeiristes venus de Lisbonne pour le week-end de roda"]],
+    Jabuti:[['2026-11-12',"A réparé le pandeiro et changé l'arame du gunga"]],
+    Sabiá:[['2026-11-05',"A accompagné Cigarra pendant ses premières séances"]],
+    Coruja:[['2026-11-19',"A animé l'échauffement et la série 2"]],
+    'Gato Preto':[['2026-09-27',"A hébergé un élève du groupe de Barcelone"]],
+  };
+  const sts = PEOPLE.map(([apelido,nom,arrivee,corda,assid,cb,last],i)=>{
+    const levels={};
+    SKILLS.forEach(s=>{
+      let base;
+      if(s.p==='contrib') base = cb + R()*1.4-0.7;
+      else {
+        const diff=corda-s.c;
+        base = diff>0 ? 2.2+0.35*diff : diff===0 ? 1.4 : diff===-1 ? 0.4 : -0.5;
+        base += R()*1.2-0.6;
+        if(s.p==='mus' && i%3===1) base-=0.7;
+        if(s.opt && i%2===0) base-=1.5;
+        if(diff===0 && (apelido==='Sereia'||apelido==='Pimenta')) base+=1;
+      }
+      levels[s.id]=Math.max(0,Math.min(3,Math.round(base)));
+    });
+    const hist=[];
+    if(last){const y=+last.slice(0,4);for(let c=1;c<=corda;c++)hist.push({corda:c,date:(y-(corda-c))+last.slice(4),event:'Batizado'})}
+    const contribs=(CONTRIBS[apelido]||[]).map(([date,text])=>({date,text}));
+    // date à laquelle chaque niveau actuel a été atteint, et derniers changements (exemples)
+    const since={}, lvlHist=[]; const a0=new Date(arrivee+'T12:00:00').getTime(), span=TODAY.getTime()-a0;
+    SKILLS.forEach(s=>{ if(levels[s.id]>0){ const d=isoDay(new Date(a0+span*(0.35+0.65*R()))); since[s.id]=d;
+      if(days(new Date(d+'T12:00:00'),TODAY)<=120) lvlHist.push({sk:s.id,from:levels[s.id]-1,to:levels[s.id],date:d}); }});
+    lvlHist.sort((x,y)=>x.date.localeCompare(y.date));
+    return {id:'e'+i,apelido,nom,arrivee,corda,levels,hist,assid,color:AV[i%AV.length],notes:'',contribs,since,lvlHist};
+  });
+  // Séances : mardi et jeudi, 8 dernières semaines
+  const TEMPLATES = [
+    {title:'Ginga, esquivas et Série 1',blocks:[['phys','Échauffement articulaire',15,['soupl','cardio']],['mouv','Ginga et esquivas en miroir',25,['ginga','esq']],['jeu','Série 1 en binômes',30,['s1']],['jeu','Roda Regional',20,['regional','roda','palmas']],['mus','Musique : corridos et pandeiro',30,['coro','corridos','pandeiro']]]},
+    {title:'Angola : chamada et toque',blocks:[['phys','Échauffement au sol',15,['soupl','gainage']],['jeu','Jogo de Angola, rythme lent',25,['angola','malicia']],['jeu','Chamada',20,['chamada']],['cult','Mestre Pastinha',10,['mestres']],['jeu','Roda Angola',20,['roda','angola']],['mus','Musique : toque Angola au berimbau',30,['gunga','t_angola']]]},
+    {title:'Coups de pied tournants',blocks:[['phys','Cardio et gainage',15,['cardio','gainage']],['mouv','Armada, queixada, meia-lua de compasso',30,['armada','queix','mlc']],['jeu','Série 2',25,['s2']],['jeu','Roda Regional',20,['regional']],['mus','Musique : São Bento Grande',30,['t_sbg','medio']]]},
+    {title:'Aú, rolê et Série 3',blocks:[['phys','Échauffement',15,['soupl']],['mouv','Aú et rolê',20,['au','role']],['mouv','Bananeira et macaco (facultatif)',10,['bananeira','macaco']],['jeu','Série 3',25,['s3']],['jeu','Roda Regional',20,['regional','roda']],['mus','Musique : atabaque et agogô',30,['atabaque','agogo']]]},
+  ];
+  let sid=0; const ses=[];
+  for(let w=8;w>=1;w--){
+    for(const dow of [2,4]){ // mar, jeu
+      const d=new Date(TODAY); d.setDate(d.getDate()-w*7+(dow-2));
+      if(d>=TODAY) continue;
+      const t=TEMPLATES[sid%TEMPLATES.length];
+      const present=sts.filter(s=>new Date(s.arrivee)<=d && (s.apelido!=='Tatu'||w>4) && R()<(s.apelido==='Tatu'?.8:s.assid)).map(s=>s.id);
+      ses.push({id:'s'+(sid++),date:isoDay(d),time:settings.time,title:t.title,blocks:t.blocks.map(b=>({p:b[0],title:b[1],min:b[2],skills:[...b[3]]})),present,done:true});
+    }
+  }
+  ses.push({id:'x-today',date:TODAY_ISO,time:settings.time,title:'Benguela et jeu au sol',done:false,present:[],
+    blocks:[{p:'phys',title:'Échauffement et mobilité',min:15,skills:['soupl','cardio']},{p:'mouv',title:'Esquivas basses et rolê',min:25,skills:['esq','role','cocor']},
+    {p:'jeu',title:'Série 2 en binômes',min:20,skills:['s2']},{p:'cult',title:'Les toques de Mestre Bimba',min:10,skills:['hist','mestres']},
+    {p:'jeu',title:'Roda Regional',min:20,skills:['regional','roda','palmas','coro']},{p:'mus',title:'Musique : toque Benguela, gunga et médio',min:30,skills:['t_benguela','gunga','medio']}]});
+  ses.push({id:'x-next',date:nextTraining(true),time:settings.time,title:'Séance à préparer',done:false,present:[],blocks:[]});
+  const st=n=>sts.find(x=>x.apelido===n);
+  Object.assign(st('Tatu'),{status:'pause',statusNote:'Blessure au genou, retour prévu en janvier'});
+  Object.assign(st('Vento'),{status:'inactif',statusNote:'A déménagé à Lyon'});
+  return {students:sts.filter(x=>x.status!=='inactif'),archived:sts.filter(x=>x.status==='inactif'),sessions:ses};
+}
+const students=[]; const sessions=[];
+
+/* ---------- Calculs ---------- */
+const archived=[]; // élèves inactifs : hors de la liste et de l'appel, rien n'est effacé
+const byId=id=>students.find(s=>s.id===id)||archived.find(s=>s.id===id);
+const STATUS={actif:'Actif',pause:'En pause',inactif:'Inactif'};
+function setStatus(st,status,note){
+  const was=st.status||'actif'; st.status=status; st.statusNote=note||'';
+  if(status==='inactif'&&was!=='inactif'){students.splice(students.indexOf(st),1);archived.push(st)}
+  if(status!=='inactif'&&was==='inactif'){archived.splice(archived.indexOf(st),1);students.push(st)}
+}
+const statusPill=st=>st.status==='pause'?'<span class="pill warn">En pause</span>':st.status==='inactif'?'<span class="pill neutral">Inactif</span>':'';
+const sess=id=>sessions.find(s=>s.id===id);
+function seniority(date){const d=new Date(date);let m=(TODAY.getFullYear()-d.getFullYear())*12+TODAY.getMonth()-d.getMonth();const y=Math.floor(m/12);m%=12;
+  return (y?y+(y>1?' ans':' an'):'')+(y&&m?' ':'')+(m?m+' mois':'')||'Ce mois-ci'}
+const fmt=d=>new Date(d+'T12:00:00').toLocaleDateString('fr-FR',{day:'numeric',month:'short'});
+const fmtL=d=>new Date(d+'T12:00:00').toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long'});
+const done=()=>sessions.filter(s=>s.done).sort((a,b)=>a.date.localeCompare(b.date));
+function presences(st){return done().filter(s=>s.present.includes(st.id))}
+function lastSeen(st){const p=presences(st);return p.length?p[p.length-1].date:null}
+function rate(st){const eligible=done().filter(s=>new Date(s.date)>=new Date(st.arrivee));if(!eligible.length)return null;return Math.round(100*presences(st).length/eligible.length)}
+const scope=(st,p)=>SKILLS.filter(s=>s.c<=st.corda&&!s.opt&&(!p||s.p===p));
+function pillarAvg(st,p){const sk=scope(st,p);return sk.length?sk.reduce((a,s)=>a+st.levels[s.id],0)/sk.length:0}
+function lastCorda(st){return st.hist.length?st.hist[st.hist.length-1].date:st.arrivee}
+const contribLabel=v=>v>=2.5?'Très forte':v>=1.8?'Forte':v>=1?'Moyenne':'Discrète';
+function readiness(st){
+  if(!STEPS[st.corda+1]) return null;
+  const since=lastCorda(st); const months=Math.floor((TODAY-new Date(since+'T12:00:00'))/(864e5*30.4));
+  const ref=SKILLS.filter(s=>s.c===st.corda&&!s.opt&&s.p!=='contrib'); const acq=ref.filter(s=>st.levels[s.id]>=2);
+  return {to:st.corda+1,since,months,eligible:months>=12,ref,acq,contrib:pillarAvg(st,'contrib'),pres:rate(st)};
+}
+const hm=m=>m>=60?`${Math.floor(m/60)}h${m%60?String(m%60).padStart(2,'0'):''}`:`${m} min`;
+const split=b=>({cours:b.filter(x=>x.p!=='mus').reduce((a,x)=>a+x.min,0),mus:b.filter(x=>x.p==='mus').reduce((a,x)=>a+x.min,0)});
+const fmtDur=b=>{const d=split(b);return `${hm(d.cours)} + ${d.mus} min musique`};
+const monthYear=d=>new Date(d+'T12:00:00').toLocaleDateString('fr-FR',{month:'short',year:'numeric'});
+function workedCount(st,sk){return done().filter(se=>se.present.includes(st.id)&&se.blocks.some(b=>b.skills.includes(sk))).length}
+function lvInfo(st,sk){
+  const l=st.levels[sk], parts=[lvLabel(sk,l)+(l>0&&st.since&&st.since[sk]?` depuis ${monthYear(st.since[sk])}`:'')];
+  if(S[sk].p!=='contrib'){const n=workedCount(st,sk); parts.push(n?`travaillée ${n} fois`:'pas encore travaillée');}
+  return parts.join(' · ');
+}
+function setLevel(st,sk,l){
+  const from=st.levels[sk]; if(from===l) return; st.levels[sk]=l;
+  const h=st.lvlHist; let i=h.length-1; while(i>=0&&!(h[i].sk===sk&&h[i].date===TODAY_ISO)) i--;
+  if(i>=0){h[i].to=l; if(h[i].from===l) h.splice(i,1)} else h.push({sk,from,to:l,date:TODAY_ISO});
+  if(l>0) st.since[sk]=TODAY_ISO; else delete st.since[sk];
+}
+function balance(daysBack=30){
+  const from=new Date(TODAY);from.setDate(from.getDate()-daysBack);
+  const tot={};SPILL.forEach(p=>tot[p.id]=0);
+  done().filter(s=>new Date(s.date)>=from).forEach(s=>s.blocks.forEach(b=>tot[b.p]+=b.min));
+  return tot;
+}
+
+/* ---------- Réglages et sauvegarde ---------- */
+let settings={days:[2,4],time:'19:30',lastExport:null};
+let sample=false, loaded=false;
+const DAYS=[[1,'Lun'],[2,'Mar'],[3,'Mer'],[4,'Jeu'],[5,'Ven'],[6,'Sam'],[0,'Dim']];
+function nextTraining(strictlyAfter){
+  const d=new Date(TODAY);
+  for(let k=strictlyAfter?1:0;k<=7;k++){const x=new Date(TODAY);x.setDate(d.getDate()+k);if(settings.days.includes(x.getDay()))return isoDay(x)}
+  return TODAY_ISO;
+}
+function snapshot(){return {app:'rueda-de-sol',v:1,savedAt:new Date().toISOString(),students,archived,sessions,skills:SKILLS,settings,sample}}
+function applyState(st){
+  students.splice(0,students.length,...(st.students||[]));
+  archived.splice(0,archived.length,...(st.archived||[]));
+  sessions.splice(0,sessions.length,...(st.sessions||[]));
+  SKILLS.splice(0,SKILLS.length,...(st.skills&&st.skills.length?st.skills:JSON.parse(JSON.stringify(DEFAULT_SKILLS))));
+  Object.keys(S).forEach(k=>delete S[k]); SKILLS.forEach(s=>S[s.id]=s);
+  [...students,...archived].forEach(x=>{x.levels=x.levels||{};x.since=x.since||{};x.lvlHist=x.lvlHist||[];x.contribs=x.contribs||[];x.hist=x.hist||[];SKILLS.forEach(s=>{if(x.levels[s.id]==null)x.levels[s.id]=0})});
+  settings=Object.assign({days:[2,4],time:'19:30',lastExport:null},st.settings||{});
+  sample=!!st.sample;
+}
+let saveT=null;
+function saveNow(){
+  clearTimeout(saveT); saveT=null; if(!loaded) return Promise.resolve();
+  return idbSet('state',JSON.parse(JSON.stringify(snapshot()))).catch(err=>{console.error(err);toast("L'enregistrement sur ce téléphone a échoué. Exporte une sauvegarde depuis les réglages.")});
+}
+function scheduleSave(){clearTimeout(saveT);saveT=setTimeout(saveNow,300)}
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'&&saveT)saveNow()});
+async function exportBackup(){
+  const name=`rueda-de-sol-${TODAY_ISO}.json`;
+  const file=new File([JSON.stringify(snapshot(),null,1)],name,{type:'application/json'});
+  try{
+    if(navigator.canShare&&navigator.canShare({files:[file]})){await navigator.share({files:[file],title:'Sauvegarde Rueda de Sol'})}
+    else{const a=document.createElement('a');a.href=URL.createObjectURL(file);a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),4000)}
+    settings.lastExport=TODAY_ISO; toast('Sauvegarde exportée'); keep();
+  }catch(e){ if(e&&e.name==='AbortError') return; toast("L'export n'a pas abouti. Réessaie."); }
+}
+let pendingImport=null;
+function pickBackup(){
+  const inp=document.createElement('input'); inp.type='file'; inp.accept='application/json,.json';
+  inp.addEventListener('change',()=>{const f=inp.files&&inp.files[0]; if(!f) return;
+    f.text().then(t=>{const d=JSON.parse(t); if(d.app!=='rueda-de-sol'||!Array.isArray(d.students)) throw new Error('format');
+      pendingImport=d; importSheet(d)}).catch(()=>toast("Ce fichier n'est pas une sauvegarde Rueda de Sol."))});
+  inp.click();
+}
+function importSheet(d){
+  const when=d.savedAt?new Date(d.savedAt).toLocaleDateString('fr-FR',{day:'numeric',month:'long',year:'numeric'}):'date inconnue';
+  openSheet(`<form class="sheet" id="importform" aria-label="Importer une sauvegarde">
+    <h2>Importer cette sauvegarde ?</h2>
+    <p style="margin:0">Sauvegarde du ${esc(when)} : ${d.students.length+(d.archived||[]).length} élèves, ${(d.sessions||[]).length} séances.</p>
+    <p class="muted" style="margin:0">Elle remplace toutes les données actuelles de ce téléphone. Exporte d'abord une sauvegarde si tu veux pouvoir revenir en arrière.</p>
+    <div class="btns"><button type="button" class="btn" data-act="close">Annuler</button><button class="btn primary" type="submit">Remplacer</button></div>
+  </form>`);
+}
+
+/* ---------- Petits composants ---------- */
+const esc=t=>String(t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function cordaEl(c,sm){const k=CORDAS[c],cl='corda'+(sm?' sm':''),a=`role="img" aria-label="Corde ${esc(cordaName(c))}" title="${esc(cordaName(c))}"`;
+  if(!k.colors) return `<span class="${cl} none" ${a}></span>`;
+  if(k.colors==='multi') return `<span class="${cl}" ${a} style="background:linear-gradient(90deg,#D7322B 0 9%,#F2C230 9% 16%,#3D9A4F 16% 23%,#fff 23% 77%,#2F6FC0 77% 84%,#7A3E9D 84% 91%,#F0832E 91%)"></span>`;
+  return `<span class="${cl}" ${a} style="background:${k.colors[0]}"></span>`}
+const cordaName=c=>CORDAS[c].name+(CORDAS[c].sub?` · ${CORDAS[c].sub}`:'');
+const initials=st=>st.apelido.split(/[\s-]/).map(w=>w[0]).join('').slice(0,2).toUpperCase();
+const avatar=(st,big)=>st.photo?`<img class="avatar${big?' big':''}" src="${st.photo}" alt="">`:`<div class="avatar${big?' big':''}" style="background:${st.color}" aria-hidden="true">${initials(st)}</div>`;
+const CAM='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>';
+/* Photo : choisie dans la galerie ou prise avec l'appareil, recadrée en carré de 320 px */
+function pickPhoto(cb){
+  const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*';
+  inp.addEventListener('change',()=>{const file=inp.files&&inp.files[0]; if(!file) return;
+    const url=URL.createObjectURL(file), img=new Image();
+    img.onload=()=>{const n=320,c=document.createElement('canvas');c.width=c.height=n;const side=Math.min(img.naturalWidth,img.naturalHeight);
+      c.getContext('2d').drawImage(img,(img.naturalWidth-side)/2,(img.naturalHeight-side)/2,side,side,0,0,n,n);URL.revokeObjectURL(url);cb(c.toDataURL('image/jpeg',0.85))};
+    img.onerror=()=>{URL.revokeObjectURL(url);toast("Cette image n'a pas pu être lue. Essaie une photo JPEG ou PNG.")};
+    img.src=url;});
+  inp.click();
+}
+let pendingPhoto=null;
+function pillarBar(blocks){const t=blocks.reduce((a,b)=>a+b.min,0)||1;const g={};blocks.forEach(b=>g[b.p]=(g[b.p]||0)+b.min);
+  return `<div class="bar">${PILLARS.filter(p=>g[p.id]).map(p=>`<span style="width:${100*g[p.id]/t}%;background:${p.color}"></span>`).join('')}</div>`}
+const legend=()=>`<div class="legend">${SPILL.map(p=>`<span><i class="dot" style="background:${p.color}"></i>${p.name}</span>`).join('')}</div>`;
+function levelBtns(stId,skId,val){
+  const p=S[skId].p;
+  return `<div class="levels" role="radiogroup" aria-label="Niveau : ${esc(S[skId].name)}">${[0,1,2,3].map(l=>{const on=l>0&&l<=val,sel=l===val;
+    return `<button type="button" role="radio" aria-checked="${sel}" tabindex="${sel?0:-1}" class="lv${on?' on':''}${sel?' sel':''}" style="${on?`background:${P[p].color};color:var(--on-${p})`:''}" data-act="lvl" data-st="${stId}" data-sk="${skId}" data-l="${l}" aria-label="${lvLabel(skId,l)}" title="${lvLabel(skId,l)}">${l}</button>`}).join('')}</div>`}
+function radar(st){
+  const W=330,H=240,cx=165,cy=124,r=80,n=PILLARS.length;
+  const pt=(i,v)=>{const a=-Math.PI/2+i*2*Math.PI/n;return[cx+Math.cos(a)*r*v,cy+Math.sin(a)*r*v]};
+  const poly=v=>PILLARS.map((_,i)=>pt(i,v).join(',')).join(' ');
+  let g='';
+  for(const v of [1/3,1]) g+=`<polygon points="${poly(v)}" fill="none" stroke="var(--line)"/>`;
+  PILLARS.forEach((p,i)=>{const[x,y]=pt(i,1);g+=`<line x1="${cx}" y1="${cy}" x2="${x}" y2="${y}" stroke="var(--line)"/>`;
+    const[lx,ly]=pt(i,1.24);g+=`<text x="${lx}" y="${ly+4}" text-anchor="${Math.abs(lx-cx)<8?'middle':lx>cx?'start':'end'}">${p.name}</text>`});
+  g+=`<polygon points="${poly(2/3)}" fill="none" stroke="var(--orange)" stroke-width="1.5" stroke-dasharray="4 3"/>`;
+  const pts=PILLARS.map((p,i)=>pt(i,pillarAvg(st,p.id)/3));
+  g+=`<polygon points="${pts.map(p=>p.join(',')).join(' ')}" fill="var(--red)" fill-opacity=".18" stroke="var(--red)" stroke-width="2"/>`;
+  pts.forEach(([x,y])=>g+=`<circle cx="${x}" cy="${y}" r="3.5" fill="var(--red)"/>`);
+  return `<svg class="radar" viewBox="0 0 ${W} ${H}" width="100%" style="max-width:380px;align-self:center" role="img" aria-label="Profil de ${esc(st.apelido)} sur 3, attendu 2 (acquis) : ${PILLARS.map(p=>`${p.name} ${pillarAvg(st,p.id).toFixed(1).replace('.',',')}`).join(', ')}">${g}</svg>`;
+}
+
+/* ---------- État de navigation ---------- */
+let heroOpen=true;
+let refOpen=new Set(['contrib','c0']);
+document.addEventListener('toggle',e=>{const t=e.target;if(t.id==='hero-acc')heroOpen=t.open;const k=t.dataset&&t.dataset.k;if(k)t.open?refOpen.add(k):refOpen.delete(k)},true);
+let view={name:'home'}; let tab='home'; let filter=''; let skillsTab='ref';
+function focusKey(el){
+  if(!el||el===document.body||!el.closest||!el.closest('#view,#tabs')) return null;
+  if(el.tagName==='H1') return '#view h1';
+  if(el.id) return '#'+CSS.escape(el.id);
+  const d=el.dataset; if(!d||!d.act) return null;
+  return `[data-act="${d.act}"]`+Object.keys(d).filter(k=>k!=='act'&&k!=='step').map(k=>`[data-${k.replace(/[A-Z]/g,m=>'-'+m.toLowerCase())}="${CSS.escape(d[k])}"]`).join('');
+}
+const go=(name,params={})=>{view={name,...params};if(['home','students','sessions','skills'].includes(name))tab=name;render('#view h1');window.scrollTo(0,0)};
+let sheetOpener=null;
+function openSheet(html){
+  sheetOpener=focusKey(document.activeElement);
+  const layer=document.getElementById('layer');
+  layer.innerHTML=`<dialog class="dlg" data-act="close">${html}</dialog>`;
+  const dlg=layer.querySelector('dialog'), form=dlg.querySelector('form');
+  if(form&&form.getAttribute('aria-label')) dlg.setAttribute('aria-label',form.getAttribute('aria-label'));
+  dlg.addEventListener('close',()=>{dlg.remove();const k=sheetOpener;sheetOpener=null;if(k){const el=document.querySelector(k);if(el)el.focus({preventScroll:true})}});
+  dlg.showModal();
+}
+function closeSheet(restore=true){const d=document.querySelector('#layer dialog');if(!d)return;if(!restore)sheetOpener=null;d.close()}
+let toastT; function toast(m){clearTimeout(toastT);const el=document.body;el.insertAdjacentHTML('beforeend',`<div class="toast" role="status">${esc(m)}</div>`);toastT=setTimeout(()=>el.querySelector('.toast')?.remove(),4500)}
+
+/* ---------- Écrans ---------- */
+function welcome(){
+  return `
+  <div class="stack" style="gap:2px"><span class="eyebrow">${fmtL(TODAY_ISO)}</span><h1>Bem-vindo·a</h1></div>
+  <section class="card">
+    <h2>Pour commencer</h2>
+    <p style="margin:0">Ajoute tes élèves un par un. Le référentiel de compétences et les cordes du groupe sont déjà en place : tu peux les adapter dans l'onglet Compétences.</p>
+    <p class="muted" style="margin:0;font-size:.875rem">Tout reste sur ce téléphone. Pense à exporter une sauvegarde de temps en temps depuis les réglages (roue dentée en haut).</p>
+    <div class="btns"><button class="btn" data-act="sample">Essayer avec des exemples</button><button class="btn primary" data-act="add">Ajouter un élève</button></div>
+  </section>
+  <div class="footer-logos"><img src="icons/logo-asso.png" alt="Logo de l'association Tao Te Chia">Association Tao Te Chia</div>`;
+}
+function noSession(nxt){
+  return `<section class="card">
+    <span class="eyebrow">Aujourd'hui</span><h2>Pas de séance prévue</h2>
+    ${nxt?`<span class="muted">Prochaine : ${esc(nxt.title)}, ${fmtL(nxt.date)}</span>`:''}
+    <div class="btns">${nxt?`<button class="btn" data-act="edit" data-id="${nxt.id}">Voir la prochaine</button>`:''}<button class="btn primary" data-act="newtoday">Créer une séance aujourd'hui</button></div>
+  </section>`;
+}
+function home(){
+  if(!students.length&&!archived.length) return welcome();
+  const t=sessions.find(s=>s.date===TODAY_ISO);
+  const nxt=sessions.filter(s=>!s.done&&s.date>TODAY_ISO).sort((a,b)=>a.date.localeCompare(b.date))[0];
+  const absents=students.filter(s=>{if(s.status==='pause')return false;const l=lastSeen(s);return new Date(s.arrivee)<TODAY && days(new Date(s.arrivee+'T12:00:00'),TODAY)>=21 && (!l||days(new Date(l+'T12:00:00'),TODAY)>=21)});
+  const ready=students.map(s=>({s,r:readiness(s)})).filter(x=>x.r&&x.r.eligible).sort((a,b)=>b.r.contrib-a.r.contrib);
+  const bal=balance(); const btotRaw=Object.values(bal).reduce((a,b)=>a+b,0); const btot=btotRaw||1;
+  const low=btotRaw?SPILL.filter(p=>bal[p.id]/btot<.08):[];
+  return `
+  <div class="stack" style="gap:2px"><span class="eyebrow">${fmtL(TODAY_ISO)}</span><h1>Bom treino, professor·a</h1></div>
+  ${t?`  <details class="card hero acc" id="hero-acc"${heroOpen?' open':''}>
+    <summary><div class="stack" style="gap:6px;flex:1;min-width:0">
+      <div class="row between"><span class="eyebrow">${t.done?`Appel fait · ${t.present.length} présents`:`Séance du jour · ${t.time}`}</span><span class="eyebrow num">${fmtDur(t.blocks)}</span></div>
+      <h2 style="font-size:1.375rem">${esc(t.title)}</h2></div><span class="chev" aria-hidden="true"></span></summary>
+    <div class="stack" style="gap:4px;font-size:0.875rem">${t.blocks.map(b=>`<div class="row" style="gap:8px"><span class="num muted" style="min-width:3.75rem;white-space:nowrap">${b.min} min</span><span>${esc(b.title)}</span></div>`).join('')}</div>
+    <div class="btns">${t.done?`<button class="btn" data-act="appel" data-id="${t.id}">Corriger l'appel</button><button class="btn primary" data-act="evalgo" data-id="${t.id}">Évaluer (facultatif)</button>`:`<button class="btn" data-act="edit" data-id="${t.id}">Modifier</button><button class="btn primary" data-act="appel" data-id="${t.id}">Faire l'appel</button>`}</div>
+  </details>`:noSession(nxt)}
+  <section class="stack">
+    <div class="row between"><h2>Prochain batizado</h2><span class="muted" style="font-size:0.8125rem">1 an ou plus dans leur corde</span></div>
+    <div class="list">${ready.length?ready.map(({s,r})=>`<button class="li" data-act="student" data-id="${s.id}">${avatar(s)}<div class="grow"><div class="title">${esc(s.apelido)}</div><div class="sub row wrap" style="gap:6px">${cordaEl(s.corda)} → ${cordaEl(r.to)} <span>Contribution ${contribLabel(r.contrib).toLowerCase()} · référentiel ${r.acq.length}/${r.ref.length}</span></div></div><span class="pill ok num">${r.months} mois</span></button>`).join(''):`<div class="li muted">Personne n'a encore 1 an dans sa corde.</div>`}</div>
+  </section>
+  <section class="stack">
+    <div class="row between"><h2>À relancer</h2><span class="muted" style="font-size:0.8125rem">Absents depuis 3 semaines ou plus</span></div>
+    <div class="list">${absents.length?absents.map(s=>{const l=lastSeen(s);return `<button class="li" data-act="student" data-id="${s.id}">${avatar(s)}<div class="grow"><div class="title">${esc(s.apelido)}</div><div class="sub">Dernière venue : ${l?fmt(l):'jamais'}</div></div><span class="pill red num">${l?days(new Date(l),TODAY)+' j':'—'}</span></button>`}).join(''):`<div class="li muted">Tout le monde est venu récemment.</div>`}</div>
+  </section>
+  <section class="card">
+    <div class="row between"><h2>Équilibre sur 30 jours</h2><span class="muted num" style="font-size:.8125rem">${btotRaw?Math.round(btotRaw/60)+' h de cours':'Aucune séance faite'}</span></div>
+    <div class="bar" style="height:14px">${SPILL.map(p=>`<span style="width:${100*bal[p.id]/btot}%;background:${p.color}" title="${p.name} ${Math.round(100*bal[p.id]/btot)} %"></span>`).join('')}</div>
+    <div class="legend">${SPILL.map(p=>`<span><i class="dot" style="background:${p.color}"></i>${p.name} <b class="num">${Math.round(100*bal[p.id]/btot)} %</b></span>`).join('')}</div>
+    ${low.length?`<div style="font-size:0.875rem"><span class="pill warn">À renforcer</span> ${low.map(p=>p.name).join(', ')} : moins de 8 % du temps de cours ce mois-ci.</div>`:''}
+  </section>
+  <div class="footer-logos"><img src="icons/logo-asso.png" alt="Logo de l'association Tao Te Chia">Association Tao Te Chia</div>`;
+}
+
+function studentsList(){
+  const q=filter.toLowerCase();
+  const list=students.filter(s=>!q||(s.apelido+' '+s.nom).toLowerCase().includes(q)).sort((a,b)=>b.corda-a.corda||a.apelido.localeCompare(b.apelido));
+  return `
+  <div class="row between"><h1>Élèves</h1><button class="btn primary" data-act="add">Ajouter</button></div>
+  <input class="search" id="q" type="search" placeholder="Chercher un apelido ou un nom" value="${esc(filter)}" aria-label="Rechercher">
+  <span class="muted num" style="font-size:0.8125rem">${(()=>{const p=list.filter(s=>s.status==='pause').length,a=list.length-p;return `${a} actif${a>1?'s':''}${p?` · ${p} en pause`:''}${archived.length?` · ${archived.length} inactif${archived.length>1?'s':''}`:''}`})()}</span>
+  ${list.length?'':`<div class="card"><span class="muted">${q?'Aucun élève ne correspond à cette recherche.':'Aucun élève pour l\'instant. Touche « Ajouter » pour créer le premier.'}</span></div>`}
+  <div class="list"${list.length?'':' hidden'}>${list.map(s=>{const r=rate(s);return `<button class="li" data-act="student" data-id="${s.id}">${avatar(s)}
+    <div class="grow"><div class="title row wrap" style="gap:6px">${esc(s.apelido)}${statusPill(s)}</div><div class="sub">${esc(s.nom)} · ${seniority(s.arrivee)}</div></div>
+    <div class="stack" style="gap:4px;align-items:flex-end"><span class="row" style="gap:6px"><span class="sub" style="font-size:0.8125rem" aria-hidden="true">${CORDAS[s.corda].sub||CORDAS[s.corda].name}</span>${cordaEl(s.corda)}</span><span class="sub num" style="font-size:0.8125rem">${r==null?'—':r+' % prés.'}</span></div></button>`}).join('')}</div>
+  ${archived.length?`<details class="card lvl" data-k="arch"${refOpen.has('arch')?' open':''}><summary class="row"><span style="flex:1"><b>Inactifs</b> <span class="muted num">(${archived.length})</span></span></summary>
+    <div class="stack" style="gap:0">${archived.map(s=>`<button class="li" data-act="student" data-id="${s.id}">${avatar(s)}<div class="grow"><div class="title">${esc(s.apelido)}</div><div class="sub">${esc(s.nom)}${s.statusNote?` · ${esc(s.statusNote)}`:''}</div></div></button>`).join('')}</div></details>`:''}`;
+}
+
+function studentPage(){
+  const st=byId(view.id); const r=readiness(st); const rt=rate(st); const l=lastSeen(st);
+  return `
+  <button class="back" data-act="go" data-to="students">‹ Élèves</button>
+  <section class="row" style="gap:14px"><button class="avbtn" data-act="photo" data-id="${st.id}" aria-label="${st.photo?'Changer':'Ajouter'} la photo de ${esc(st.apelido)}">${avatar(st,true)}<span class="cam">${CAM}</span></button><div class="stack" style="gap:3px;min-width:0">
+    <h1>${esc(st.apelido)}</h1>${st.status&&st.status!=='actif'?`<span class="row wrap" style="gap:6px;font-size:0.8125rem">${statusPill(st)}${st.statusNote?`<span class="muted">${esc(st.statusNote)}</span>`:''}</span>`:''}<span class="muted">${esc(st.nom)}</span>
+    <span class="row" style="gap:8px;font-size:0.875rem">${cordaEl(st.corda)} ${cordaName(st.corda)}</span></div></section>
+  <div class="btns"><button class="btn" data-act="stedit" data-id="${st.id}">Modifier</button>${st.corda<CORDAS.length-1?`<button class="btn primary" data-act="bat" data-id="${st.id}">Nouvelle corde</button>`:''}</div>
+  <section class="card" style="flex-direction:row;justify-content:space-between;text-align:center">
+    <div class="stack" style="gap:2px"><span class="eyebrow">Arrivée</span><b class="num">${fmt(st.arrivee)} ${st.arrivee.slice(0,4)}</b><span class="muted" style="font-size:0.8125rem">${seniority(st.arrivee)}</span></div>
+    <div class="stack" style="gap:2px"><span class="eyebrow">Présence</span><b class="num">${rt==null?'—':rt+' %'}</b><span class="muted" style="font-size:0.8125rem">8 dernières sem.</span></div>
+    <div class="stack" style="gap:2px"><span class="eyebrow">Dernière fois</span><b class="num">${l?fmt(l):'—'}</b><span class="muted" style="font-size:0.8125rem">${l?days(new Date(l),TODAY)+' jours':''}</span></div>
+  </section>
+  <p class="muted" style="margin:0;font-size:0.8125rem">Les piliers plus bas se déplient pour noter les niveaux.</p>
+  <section class="card"><h2>Profil</h2>${radar(st)}
+    <div class="legend" style="justify-content:center"><span><i class="dot" style="background:var(--red)"></i>${esc(st.apelido)}</span><span><i class="dash"></i>Attendu jusqu'à sa corde : acquis</span></div>
+    <p class="muted" style="margin:0;font-size:0.8125rem">La toile compare ${esc(st.apelido)} au référentiel de sa corde et des cordes précédentes (${scope(st).length} compétences). Le bord extérieur correspond à « Maîtrisé ».</p></section>
+  ${r?`<section class="card">
+    <div class="row between wrap"><h2>Vers la corde ${CORDAS[r.to].name.toLowerCase()}</h2><span class="pill ${r.eligible?'ok':'warn'}">${r.eligible?'Possible au prochain batizado':'Encore '+(12-r.months)+' mois'}</span></div>
+    <div class="stack" style="gap:6px"><div class="row between" style="font-size:0.875rem"><span>Temps dans sa corde</span><b class="num">${r.months} mois <span class="muted" style="font-weight:400">/ 12 minimum</span></b></div>
+      <div class="progress"><span style="width:${Math.min(100,100*r.months/12)}%;background:${r.eligible?'var(--ok)':'var(--orange)'}"></span></div></div>
+    <span class="eyebrow" style="padding-top:4px">Repères pour en parler, non bloquants</span>
+    <div class="stack" style="gap:8px;font-size:0.875rem">
+      <div class="row between"><span class="row" style="gap:8px"><i class="dot" style="background:var(--p-contrib)"></i>Contribution au groupe</span><b>${contribLabel(r.contrib)}</b></div>
+      <div class="row between"><span>Référentiel de sa corde acquis</span><b class="num">${r.acq.length} / ${r.ref.length}</b></div>
+      <div class="row between"><span>Présence sur 8 semaines</span><b class="num">${r.pres==null?'—':r.pres+' %'}</b></div>
+    </div>
+    ${r.ref.length>r.acq.length?`<div class="muted" style="font-size:0.8125rem">À accompagner : ${r.ref.filter(s=>st.levels[s.id]<2).map(s=>esc(s.name)).join(', ')}</div>`:''}
+  </section>`:''}
+  ${[...PILLARS.slice(-1),...SPILL].map(p=>{const sk=SKILLS.filter(s=>s.p===p.id&&s.c<=st.corda);const later=SKILLS.filter(s=>s.p===p.id&&s.c>st.corda).length;
+    return `<details class="card lvl" data-k="st-${p.id}"${refOpen.has('st-'+p.id)?' open':''}><summary class="row"><h2 class="row" style="gap:8px;flex:1;min-width:0"><i class="dot" style="background:${p.color};width:10px;height:10px"></i>${p.name}</h2><span class="muted num" style="font-size:0.8125rem">${sk.length} · ${pillarAvg(st,p.id).toFixed(1)} / 3</span></summary>
+    <div>${sk.map(s=>`<div class="skillrow">${s.p==='contrib'?'':cordaEl(s.c,1)}<span class="name">${esc(s.name)}${s.opt?' <span class="pill warn" style="font-size:0.75rem">Facultatif</span>':''}<span class="lvname">${lvInfo(st,s.id)}</span></span>${levelBtns(st.id,s.id,st.levels[s.id])}</div>`).join('')}</div>
+    ${later?`<span class="muted" style="font-size:0.8125rem">${later} compétence${later>1?'s':''} à venir avec les cordes suivantes</span>`:''}${p.id==='contrib'?journal(st):''}</details>`}).join('')}
+  ${(()=>{const h=st.lvlHist.filter(x=>S[x.sk]).slice().reverse();return `<section class="card"><div class="row between"><h2>Progression</h2><span class="muted" style="font-size:0.8125rem">Changements de niveau datés</span></div>
+    ${h.length?`<div class="stack" style="gap:8px">${h.slice(0,6).map(x=>`<div class="row" style="gap:10px;align-items:flex-start;font-size:0.875rem"><span class="muted num" style="font-size:0.8125rem;min-width:3.75rem;white-space:nowrap;flex:none;padding-top:2px">${fmt(x.date)}</span><span style="min-width:0"><i class="dot" style="background:${P[S[x.sk].p].color};display:inline-block;margin-right:6px"></i>${esc(S[x.sk].name)} : ${lvLabel(x.sk,x.from)} → <b>${lvLabel(x.sk,x.to)}</b></span></div>`).join('')}</div>${h.length>6?`<span class="muted" style="font-size:0.8125rem">et ${h.length-6} changement${h.length-6>1?'s':''} plus ancien${h.length-6>1?'s':''}</span>`:''}`:`<span class="muted" style="font-size:0.8125rem">Aucun changement de niveau noté pour l'instant.</span>`}
+  </section>`})()}
+  <section class="card"><h2>Parcours de cordes</h2>
+    <div class="ladder">${[{corda:0,date:st.arrivee,event:'Arrivée'},...st.hist].reverse().map(h=>`<div class="rung" style="align-items:center">${cordaEl(h.corda)}<div class="grow"><b>${CORDAS[h.corda].name}</b> <span class="muted">· ${h.event}</span></div><span class="muted num" style="font-size:0.8125rem">${fmt(h.date)} ${h.date.slice(0,4)}</span></div>`).join('')}</div>
+  </section>
+  <section class="card"><h2>Notes</h2><textarea class="input" id="notes-${st.id}" placeholder="Points à travailler, blessures, objectifs…" data-act="notes" data-id="${st.id}">${esc(st.notes)}</textarea></section>`;
+}
+
+function journal(st){
+  return `<div class="stack" style="gap:8px;border-top:1px solid var(--line);padding-top:10px">
+    <div class="row between"><span class="eyebrow">Journal de contribution</span><button class="btn ghost" data-act="contrib" data-id="${st.id}">+ Noter</button></div>
+    ${st.contribs.length?st.contribs.slice().sort((a,b)=>b.date.localeCompare(a.date)).map(c=>`<div class="row" style="gap:10px;align-items:flex-start;font-size:0.875rem"><span class="muted num" style="font-size:0.8125rem;min-width:3.75rem;white-space:nowrap;flex:none;padding-top:2px">${fmt(c.date)}</span><span style="min-width:0">${esc(c.text)}</span></div>`).join(''):`<span class="muted" style="font-size:0.8125rem">Rien de noté pour l'instant.</span>`}
+  </div>`;
+}
+function contribSheet(id){
+  const st=byId(id);
+  openSheet(`<form class="sheet" id="contribform" data-id="${id}" aria-label="Noter une contribution">
+    <h2>Contribution de ${esc(st.apelido)}</h2>
+    <div class="field"><label for="c-dt">Date</label><input class="input" type="date" id="c-dt" value="${TODAY_ISO}" required></div>
+    <div class="field"><label for="c-txt">Ce qu'il ou elle a fait pour le groupe</label><textarea class="input" id="c-txt" placeholder="A hébergé les capoeiristes venus de…, a aidé un débutant…" required></textarea></div>
+    <div class="btns"><button type="button" class="btn" data-act="close">Annuler</button><button class="btn primary" type="submit">Enregistrer</button></div>
+  </form>`);
+  document.getElementById('c-txt').focus();
+}
+function skillSheet(id,preset){
+  const s=id?S[id]:{name:'',p:preset.p||'mouv',c:preset.c!=null?+preset.c:0,opt:false};
+  const noted=id?students.filter(st=>st.levels[id]>0).length:0;
+  openSheet(`<form class="sheet" id="skillform" data-id="${id||''}" aria-label="${id?'Modifier la compétence':'Nouvelle compétence'}">
+    <h2>${id?'Modifier la compétence':'Nouvelle compétence'}</h2>
+    <div class="field"><label for="k-name">Nom</label><input class="input" id="k-name" value="${esc(s.name)}" placeholder="Ex. Série 5 du groupe, Toque Cavalaria…" required></div>
+    <div class="field"><label for="k-p">Pilier</label><select class="input" id="k-p">${PILLARS.map(p=>`<option value="${p.id}"${p.id===s.p?' selected':''}>${p.name}</option>`).join('')}</select></div>
+    <div class="field"><label for="k-c">Niveau du référentiel</label><select class="input" id="k-c">${CORDAS.slice(0,9).map((k,i)=>`<option value="${i}"${i===s.c?' selected':''}>${i===0?'Débutant (sans corde)':'Corde '+k.name.toLowerCase()}</option>`).join('')}</select>
+      <span class="muted" style="font-size:0.8125rem">Sans effet pour la contribution, qui vaut pour tous les niveaux.</span></div>
+    <label class="check-row" for="k-opt"><input type="checkbox" id="k-opt"${s.opt?' checked':''}><span>Facultatif<br><span class="muted" style="font-size:0.8125rem">Se note, mais ne compte ni dans la toile ni dans les repères de passage.</span></span></label>
+    ${id&&noted?`<span class="muted" style="font-size:0.8125rem">${noted} élève${noted>1?'s ont':' a'} déjà un niveau noté sur cette compétence.</span>`:''}
+    <div class="btns">${id?`<button type="button" class="btn ghost" style="margin-right:auto;color:var(--red)" data-act="skdel" data-id="${id}">Supprimer</button>`:''}<button type="button" class="btn" data-act="close">Annuler</button><button class="btn primary" type="submit">Enregistrer</button></div>
+  </form>`);
+  document.getElementById('k-name').focus();
+}
+function settingsPage(){
+  const n=students.length+archived.length;
+  return `
+  <button class="back" data-act="go" data-to="home">‹ Accueil</button>
+  <h1>Réglages</h1>
+  <section class="card">
+    <h2>Entraînements</h2>
+    <fieldset style="border:0;padding:0;margin:0;display:flex;flex-direction:column;gap:6px"><legend class="eyebrow" style="padding:0;margin-bottom:6px">Jours</legend>
+      <div class="days">${DAYS.map(([d,l])=>`<label><input type="checkbox" data-set="day" value="${d}"${settings.days.includes(d)?' checked':''}>${l}</label>`).join('')}</div></fieldset>
+    <div class="field"><label for="set-time">Heure de début</label><input class="input" type="time" id="set-time" data-set="time" value="${settings.time}" style="max-width:9rem"></div>
+    <span class="muted" style="font-size:.875rem">Sert à proposer la date et l'heure des nouvelles séances.</span>
+  </section>
+  <section class="card">
+    <h2>Sauvegarde</h2>
+    <p style="margin:0">Tes données sont enregistrées sur ce téléphone uniquement. Si tu le perds ou changes de téléphone, seule une sauvegarde exportée permet de les retrouver.</p>
+    <span class="muted" style="font-size:.875rem">Dernière sauvegarde exportée : ${settings.lastExport?fmtL(settings.lastExport):'jamais'}.</span>
+    <div class="btns"><button class="btn" data-act="import">Importer</button><button class="btn primary" data-act="export">Exporter une sauvegarde</button></div>
+  </section>
+  <section class="card">
+    <h2>Données</h2>
+    <span class="muted" style="font-size:.875rem">${n} élève${n>1?'s':''}, ${sessions.length} séance${sessions.length>1?'s':''}, ${SKILLS.length} compétences.${sample?' Ce sont des données d\'exemple.':''}</span>
+    <div class="btns">${n?'':'<button class="btn" data-act="sample">Charger des exemples</button>'}<button class="btn ghost" style="color:var(--red)" data-act="wipe">Tout effacer</button></div>
+  </section>
+  <p class="muted" style="margin:0;font-size:.8125rem">Rueda de Sol · version ${APP_VERSION}</p>`;
+}
+function sessionsList(){
+  const up=sessions.filter(s=>!s.done).sort((a,b)=>a.date.localeCompare(b.date));
+  const past=done().slice().reverse();
+  const row=s=>{const tot=s.blocks.reduce((a,b)=>a+b.min,0);return `<button class="li" data-act="${s.done?'edit':'edit'}" data-id="${s.id}"><div class="grow stack" style="gap:6px">
+    <div class="row between"><span class="title">${esc(s.title)}</span><span class="sub num">${fmt(s.date)}</span></div>
+    ${s.blocks.length?pillarBar(s.blocks):'<span class="sub">Aucun bloc pour l\'instant</span>'}
+    <span class="sub num">${fmtDur(s.blocks)}${s.done?` · ${s.present.length} présents`:''}</span></div></button>`};
+  return `
+  <div class="row between"><h1>Séances</h1><button class="btn primary" data-act="new">Nouvelle séance</button></div>
+  ${legend()}
+  <span class="eyebrow">À venir</span>${up.length?`<div class="list">${up.map(row).join('')}</div>`:'<span class="muted">Aucune séance prévue. Touche « Nouvelle séance » pour préparer la prochaine.</span>'}
+  <span class="eyebrow">Passées</span>${past.length?`<div class="list">${past.map(row).join('')}</div>`:'<span class="muted">Les séances apparaissent ici une fois l\'appel fait.</span>'}`;
+}
+
+let draft=null;
+function editor(){
+  if(!draft||draft.id!==view.id) draft=JSON.parse(JSON.stringify(sess(view.id)));
+  const tot=draft.blocks.reduce((a,b)=>a+b.min,0);
+  return `
+  <button class="back" data-act="go" data-to="sessions">‹ Séances</button>
+  <div class="field"><label for="ttl">Titre de la séance</label><input class="input" id="ttl" value="${esc(draft.title)}" data-act="ttl"></div>
+  <div class="row" style="gap:10px"><div class="field" style="flex:1"><label for="dt">Date</label><input class="input" type="date" id="dt" value="${draft.date}" data-act="dt"></div>
+    <div class="field" style="width:7.5rem"><label for="tm">Heure</label><input class="input" type="time" id="tm" value="${draft.time}" data-act="tm"></div></div>
+  <div class="card" style="gap:8px"><div class="row between"><span class="eyebrow">Répartition</span><span class="num" style="font-weight:700">${fmtDur(draft.blocks)}</span></div>${draft.blocks.length?pillarBar(draft.blocks):''}${legend()}${(()=>{const d=split(draft.blocks);return d.cours===90&&d.mus===30?'':`<span style="font-size:0.8125rem"><span class="pill warn">À ajuster</span> Prévu : 1h30 de cours et 30 min de musique (actuellement ${hm(d.cours)} et ${d.mus} min).</span>`})()}</div>
+  ${draft.blocks.map((b,i)=>`<div class="block">
+    <div class="block-head"><select class="input" style="width:auto;flex:none;color:${P[b.p].color};font-weight:700" data-act="bp" data-i="${i}" aria-label="Pilier" id="bp-${i}">${SPILL.map(p=>`<option value="${p.id}"${p.id===b.p?' selected':''}>${p.name}</option>`).join('')}</select>
+      <span style="flex:1"></span>
+      <button class="iconbtn" data-act="bup" data-i="${i}" aria-label="Monter" ${i?'':'disabled'}>↑</button>
+      <button class="iconbtn" data-act="bdel" data-i="${i}" aria-label="Supprimer le bloc">✕</button></div>
+    <div class="row" style="gap:8px"><input class="input" id="bt-${i}" value="${esc(b.title)}" data-act="bt" data-i="${i}" aria-label="Titre du bloc" style="flex:1">
+      <div class="stepper"><button data-act="bmin" data-i="${i}" data-d="-5" aria-label="Moins 5 minutes">−</button><span class="num">${b.min} min</span><button data-act="bmin" data-i="${i}" data-d="5" aria-label="Plus 5 minutes">+</button></div></div>
+    <div class="row wrap" style="gap:6px">${SKILLS.filter(s=>s.p===b.p).map(s=>`<button class="chip${b.skills.includes(s.id)?' on':''}" data-act="bsk" data-i="${i}" data-sk="${s.id}">${esc(s.name)}</button>`).join('')}</div>
+  </div>`).join('')}
+  <button class="btn" data-act="badd">+ Ajouter un bloc</button>
+  <div class="btns" style="padding-top:6px"><button class="btn" data-act="leave" data-to="sessions">Annuler</button>${draft.done?`<button class="btn" data-act="appel" data-id="${draft.id}">Corriger l'appel</button><button class="btn" data-act="evalgo" data-id="${draft.id}">Évaluer</button>`:`<button class="btn" data-act="saveappel">Enregistrer et faire l'appel</button>`}<button class="btn primary" data-act="save">Enregistrer</button></div>`;
+}
+
+let appelSel=null;
+function appel(){
+  const s=sess(view.id); if(!appelSel) appelSel=new Set(s.present);
+  const list=students.filter(x=>x.status!=='pause').sort((a,b)=>a.apelido.localeCompare(b.apelido)); const paused=students.filter(x=>x.status==='pause');
+  return `
+  <button class="back" data-act="go" data-to="home">‹ Accueil</button>
+  <div class="stack" style="gap:2px"><span class="eyebrow">Appel · ${fmt(s.date)} ${s.time}</span><h1>${esc(s.title)}</h1></div>
+  <div class="row between"><span class="muted">Touche les élèves présents</span><b class="num">${appelSel.size} / ${list.length}</b></div>
+  ${paused.length?`<span class="muted" style="font-size:0.8125rem">En pause, non affiché${paused.length>1?'s':''} : ${paused.map(x=>esc(x.apelido)).join(', ')}</span>`:''}
+  ${list.length?'':'<span class="muted">Aucun élève actif. Ajoute des élèves depuis l\'onglet Élèves.</span>'}<div class="grid-tiles">${list.map(st=>`<button class="tile${appelSel.has(st.id)?' on':''}" data-act="tog" data-id="${st.id}" aria-pressed="${appelSel.has(st.id)}"><span class="check">✓</span>${avatar(st)}<span>${esc(st.apelido)}</span>${cordaEl(st.corda)}</button>`).join('')}</div>
+  <div class="btns"><button class="btn" data-act="go" data-to="home">Plus tard</button><button class="btn primary" data-act="valid" data-id="${s.id}" ${appelSel.size?'':'disabled'}>Valider l'appel</button></div>`;
+}
+
+function evaluate(){
+  const s=sess(view.id); const sk=[...new Set(s.blocks.flatMap(b=>b.skills))]; const pres=s.present.map(byId);
+  return `
+  <div class="stack" style="gap:2px"><span class="eyebrow">${s.present.length} présents · ${fmt(s.date)}</span><h1>Évaluer la séance</h1></div>
+  <p class="muted" style="margin:0">Facultatif. Le nombre de séances travaillées se compte tout seul à partir de l'appel. Note ici seulement les progrès que tu as remarqués : chaque changement est daté sur la fiche de l'élève.</p>
+  ${sk.map(id=>`<details class="card lvl" data-k="ev-${s.id}-${id}"${refOpen.has('ev-'+s.id+'-'+id)?' open':''}><summary class="row"><h2 class="row" style="gap:8px;flex:1;min-width:0"><i class="dot" style="background:${P[S[id].p].color};width:10px;height:10px"></i>${esc(S[id].name)}</h2><span class="muted num" style="font-size:0.8125rem">${pres.filter(st=>st.levels[id]>=2).length}/${pres.length} acquis</span></summary>
+    <div>${pres.map(st=>`<div class="skillrow"><span class="name">${esc(st.apelido)}<span class="lvname">${lvInfo(st,id)}</span></span>${levelBtns(st.id,id,st.levels[id])}</div>`).join('')}</div></details>`).join('')}
+  <div class="btns"><button class="btn" data-act="go" data-to="home">Passer</button><button class="btn primary" data-act="evaldone">Terminer</button></div>`;
+}
+
+function skillsPage(){
+  const seg=`<div class="seg" role="group" aria-label="Affichage"><button aria-pressed="${skillsTab==='ref'}" class="${skillsTab==='ref'?'on':''}" data-act="seg" data-v="ref">Référentiel</button><button aria-pressed="${skillsTab==='cordas'}" class="${skillsTab==='cordas'?'on':''}" data-act="seg" data-v="cordas">Cordes</button></div>`;
+  if(skillsTab==='ref') return `<h1>Compétences</h1>${seg}
+    <p class="muted" style="margin:0;font-size:0.875rem">Chaque corde a son référentiel, qui sert de repère et ne bloque pas le passage. Touche une compétence pour la renommer, la déplacer ou la supprimer. La barre montre la part des élèves concernés au niveau « Acquis » (« Souvent » pour la contribution).</p>
+    <details class="card lvl" data-k="contrib"${refOpen.has('contrib')?' open':''}><summary class="row"><span class="row" style="gap:10px;flex:1;min-width:0"><i class="dot" style="background:var(--p-contrib);width:12px;height:12px"></i><span class="stack" style="gap:0"><b>Contribution au groupe</b><span class="muted" style="font-size:0.8125rem">Tous niveaux, compte autant que la technique</span></span></span></summary>
+      ${SKILLS.filter(s=>s.p==='contrib').map(s=>{const n=students.filter(st=>st.levels[s.id]>=2).length;return `<div class="skillrow"><button class="skbtn" data-act="skedit" data-id="${s.id}">${esc(s.name)}<span class="pen" aria-hidden="true">✎</span></button><div class="progress" style="width:70px;flex:none"><span style="width:${100*n/students.length}%;background:var(--p-contrib)"></span></div><span class="muted num" style="font-size:0.8125rem;min-width:2.75rem;text-align:right;white-space:nowrap">${n}/${students.length}</span></div>`}).join('')}
+      <button class="btn ghost" style="align-self:flex-start" data-act="skedit" data-p="contrib">+ Ajouter une contribution</button>
+    </details>
+    ${CORDAS.map((k,i)=>{const sk=SKILLS.filter(s=>s.c===i&&s.p!=='contrib');if(i>8)return '';const concern=students.filter(st=>st.corda>=i);
+      return `<details class="card lvl" data-k="c${i}"${refOpen.has('c'+i)?' open':''}><summary class="row"><span class="row grow" style="gap:10px;flex:1;min-width:0">${cordaEl(i)}<span class="stack" style="gap:0"><b>${i===0?'Débutant':'Corde '+k.name.toLowerCase()}</b><span class="muted" style="font-size:0.8125rem">${i===0?'Sans corde, vers la blanche':'Vers la corde '+CORDAS[i+1].name.toLowerCase()}</span></span></span><span class="muted num" style="font-size:0.8125rem">${sk.length} compétences</span></summary>
+      ${PILLARS.filter(p=>sk.some(s=>s.p===p.id)).map(p=>`<div class="stack" style="gap:0"><span class="eyebrow row" style="gap:6px;padding-top:4px"><i class="dot" style="background:${p.color}"></i>${p.name}</span>${sk.filter(s=>s.p===p.id).map(s=>{const n=concern.filter(st=>st.levels[s.id]>=2).length;return `<div class="skillrow"><button class="skbtn" data-act="skedit" data-id="${s.id}">${esc(s.name)}${s.opt?' <span class="pill warn" style="font-size:0.75rem">Facultatif</span>':''}<span class="pen" aria-hidden="true">✎</span></button><div class="progress" style="width:70px;flex:none"><span style="width:${concern.length?100*n/concern.length:0}%;background:${p.color}"></span></div><span class="muted num" style="font-size:0.8125rem;min-width:2.75rem;text-align:right;white-space:nowrap">${n}/${concern.length}</span></div>`}).join('')}</div>`).join('')}
+      ${sk.length?'':'<span class="muted" style="font-size:0.8125rem">Aucune compétence pour l\'instant.</span>'}
+      <button class="btn ghost" style="align-self:flex-start" data-act="skedit" data-c="${i}">+ Ajouter à ce niveau</button>
+      </details>`}).join('')}
+    <button class="btn" data-act="skedit">+ Nouvelle compétence</button>`;
+  return `<h1>Compétences</h1>${seg}
+  <div class="list" style="padding:0 14px"><div class="ladder">${CORDAS.map((c,i)=>{const now=students.filter(s=>s.corda===i);const cr=STEPS[i];
+    const ready=students.filter(s=>s.corda===i-1&&readiness(s)?.eligible);
+    return `<div class="rung"><div style="padding-top:6px">${cordaEl(i)}</div><div class="grow stack" style="gap:4px">
+      <div class="row between"><b>${c.name}${c.sub?` <span class="muted" style="font-weight:500">· ${c.sub}</span>`:''}</b><span class="muted num" style="font-size:0.8125rem">${now.length?now.length+' élève'+(now.length>1?'s':''):''}</span></div>
+      ${cr?`<span class="muted" style="font-size:0.8125rem">Au moins 1 an ${i===1?'de pratique':'en corde '+CORDAS[i-1].name.toLowerCase()}. Repères : référentiel, contribution, présence.</span>`:i===0?'<span class="muted" style="font-size:0.8125rem">À l\'arrivée</span>':i>=8?'<span class="muted" style="font-size:0.8125rem">Décision du mestre</span>':'<span class="muted" style="font-size:0.8125rem">Critères à définir</span>'}
+      ${ready.length?`<span style="font-size:0.8125rem"><span class="pill ok">Possible</span> ${ready.map(s=>esc(s.apelido)).join(', ')}</span>`:''}
+    </div></div>`}).join('')}</div></div>`;
+}
+
+function studentSheet(id){
+  const st=byId(id);
+  openSheet(`<form class="sheet" id="stform" data-id="${id}" aria-label="Modifier ${esc(st.apelido)}">
+    <h2>Modifier ${esc(st.apelido)}</h2>
+    <div class="field"><label for="s-ap">Apelido</label><input class="input" id="s-ap" value="${esc(st.apelido)}" required></div>
+    <div class="field"><label for="s-nom">Prénom et nom</label><input class="input" id="s-nom" value="${esc(st.nom)}" required></div>
+    ${st.photo?`<div class="photo-field">${avatar(st)}<span class="muted" style="flex:1;font-size:0.8125rem">Pour changer la photo, touche-la sur la fiche.</span><button type="button" class="btn ghost" style="color:var(--red)" data-act="rmphoto" data-id="${id}">Retirer la photo</button></div>`:''}
+    <div class="field"><label for="s-dt">Date d'arrivée</label><input class="input" type="date" id="s-dt" value="${st.arrivee}" required></div>
+    <fieldset style="border:0;padding:0;margin:0;display:flex;flex-direction:column;gap:5px"><legend style="font-size:0.8125rem;font-weight:600;color:var(--muted);padding:0;margin-bottom:5px">Statut</legend>
+      <div class="seg">${Object.entries(STATUS).map(([k,l])=>`<label class="segopt"><input type="radio" name="s-status" value="${k}"${(st.status||'actif')===k?' checked':''}>${l}</label>`).join('')}</div>
+      <span class="muted" style="font-size:0.8125rem">En pause : reste dans la liste, sort de l'appel et des relances. Inactif : sort de la liste et de l'appel, rien n'est effacé.</span></fieldset>
+    <div class="field"><label for="s-snote">Précision sur le statut (facultatif)</label><input class="input" id="s-snote" value="${esc(st.statusNote||'')}" placeholder="Blessure, voyage, a déménagé…"></div>
+    <div class="btns"><button type="button" class="btn" data-act="close">Annuler</button><button class="btn primary" type="submit">Enregistrer</button></div>
+  </form>`);
+  document.getElementById('s-ap').focus();
+}
+function batizadoSheet(id){
+  const st=byId(id), last=lastCorda(st);
+  openSheet(`<form class="sheet" id="batform" data-id="${id}" aria-label="Nouvelle corde pour ${esc(st.apelido)}">
+    <h2>Nouvelle corde pour ${esc(st.apelido)}</h2>
+    <p class="muted" style="margin:0;font-size:0.875rem">Corde actuelle : ${cordaName(st.corda)}, depuis le ${fmt(last)} ${last.slice(0,4)}.</p>
+    <div class="field"><label for="b-c">Nouvelle corde</label><select class="input" id="b-c">${CORDAS.map((k,i)=>i>st.corda?`<option value="${i}"${i===st.corda+1?' selected':''}>${cordaName(i)}</option>`:'').join('')}</select></div>
+    <div class="field"><label for="b-dt">Date</label><input class="input" type="date" id="b-dt" value="${TODAY_ISO}" required></div>
+    <div class="field"><label for="b-ev">Occasion</label><select class="input" id="b-ev"><option>Batizado</option><option>Troca de cordas</option></select></div>
+    <div class="btns"><button type="button" class="btn" data-act="close">Annuler</button><button class="btn primary" type="submit">Enregistrer</button></div>
+  </form>`);
+  document.getElementById('b-c').focus();
+}
+function leaveSheet(to){
+  openSheet(`<form class="sheet" id="leaveform" aria-label="Modifications non enregistrées">
+    <h2>Modifications non enregistrées</h2>
+    <p class="muted" style="margin:0">La séance « ${esc(draft.title)} » a des changements qui ne sont pas encore enregistrés.</p>
+    <div class="btns"><button type="button" class="btn" data-act="leave" data-to="${to}">Quitter sans enregistrer</button><button type="button" class="btn primary" data-act="saveleave" data-to="${to}">Enregistrer</button></div>
+  </form>`);
+}
+function addSheet(){
+  openSheet(`<form class="sheet" id="addform" aria-label="Ajouter un élève">
+    <h2>Nouvel élève</h2>
+    <div class="photo-field"><span id="f-prev"><div class="avatar" style="background:var(--sunk);color:var(--muted)" aria-hidden="true">${CAM}</div></span><button type="button" class="btn" data-act="addphoto">Ajouter une photo</button><span class="muted" style="font-size:0.8125rem">Facultatif</span></div>
+    <div class="field"><label for="f-ap">Apelido</label><input class="input" id="f-ap" placeholder="Laisser vide s'il n'a pas encore été baptisé"></div>
+    <div class="field"><label for="f-nom">Prénom et nom</label><input class="input" id="f-nom" required></div>
+    <div class="field"><label for="f-dt">Date d'arrivée</label><input class="input" type="date" id="f-dt" value="${TODAY_ISO}" required></div>
+    <div class="field"><label for="f-c">Corde actuelle</label><select class="input" id="f-c">${CORDAS.map((c,i)=>`<option value="${i}">${cordaName(i)}</option>`).join('')}</select></div>
+    <div class="btns"><button type="button" class="btn" data-act="close">Annuler</button><button class="btn primary" type="submit">Ajouter</button></div>
+  </form>`);
+  document.getElementById('f-nom').focus();
+}
+
+/* ---------- Rendu & événements ---------- */
+const TABS=[['home','Accueil','<path d="M3 11l9-7 9 7v9a1 1 0 01-1 1h-5v-6H9v6H4a1 1 0 01-1-1z"/>'],
+  ['students','Élèves','<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><circle cx="17" cy="9" r="2.6"/><path d="M16 14.6c2.6-.1 4.6 1.6 5.4 4.4"/>'],
+  ['sessions','Séances','<rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/>'],
+  ['skills','Compétences','<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3"/><path d="M12 3.5v3M12 17.5v3M3.5 12h3M17.5 12h3"/>']];
+function render(focusSel){
+  const prev=focusSel||focusKey(document.activeElement);
+  const V={home,students:studentsList,student:studentPage,sessions:sessionsList,edit:editor,appel,evaluate,skills:skillsPage,settings:settingsPage};
+  document.getElementById('view').innerHTML=V[view.name]();
+  document.getElementById('tabs').innerHTML=TABS.map(([id,l,ic])=>`<button class="${tab===id?'on':''}" data-act="go" data-to="${id}" aria-current="${tab===id?'page':'false'}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ic}</svg>${l}</button>`).join('');
+  const h1=document.querySelector('#view h1'); if(h1) h1.tabIndex=-1;
+  document.title=(h1?h1.textContent.trim():'Accueil')+' · Rueda de Sol';
+  document.getElementById('demo-badge').hidden=!sample;
+  scheduleSave();
+  if(prev){const el=document.querySelector(prev);if(el)el.focus({preventScroll:true})}
+}
+document.addEventListener('click',e=>{
+  const t=e.target.closest('[data-act]'); if(!t) return;
+  const a=t.dataset.act, d=t.dataset;
+  if(a==='close'){ if(e.target===t) closeSheet(); return }
+  if(['ttl','dt','tm','bt','bp','notes'].includes(a)) return;
+  e.preventDefault();
+  switch(a){
+    case 'go': if(view.name==='edit'&&draft&&JSON.stringify(draft)!==JSON.stringify(sess(draft.id))){leaveSheet(d.to);break} draft=null; appelSel=null; go(d.to); break;
+    case 'leave': closeSheet(false); draft=null; appelSel=null; go(d.to||'sessions'); break;
+    case 'saveleave':{closeSheet(false); const i=sessions.findIndex(x=>x.id===draft.id); sessions[i]=draft; draft=null; toast('Séance enregistrée'); go(d.to); break}
+    case 'evalgo': go('evaluate',{id:d.id}); break;
+    case 'student': go('student',{id:d.id}); tab='students'; render(); break;
+    case 'add': pendingPhoto=null; addSheet(); break;
+    case 'sample':{if(students.length||archived.length)break; const d=buildSample(); students.push(...d.students); archived.push(...d.archived); sessions.push(...d.sessions); sample=true; toast('Exemples chargés'); go('home'); break}
+    case 'export': exportBackup(); break;
+    case 'import': pickBackup(); break;
+    case 'wipe':{
+      if(!d.step){t.dataset.step='1';t.textContent='Confirmer : tout effacer';t.classList.remove('ghost');t.classList.add('danger');break}
+      applyState({}); toast('Toutes les données ont été effacées'); go('home'); break}
+    case 'newtoday':{const id='n'+Date.now();sessions.push({id,date:TODAY_ISO,time:settings.time,title:'Séance du jour',done:false,present:[],blocks:[{p:'phys',title:'Échauffement',min:15,skills:[]},{p:'mus',title:'Musique',min:30,skills:[]}]});draft=null;go('edit',{id});tab='sessions';render();break}
+    case 'photo': {const st=byId(d.id); pickPhoto(url=>{st.photo=url; toast('Photo enregistrée'); keep();}); break}
+    case 'rmphoto': {const st=byId(d.id); delete st.photo; closeSheet(); toast('Photo retirée'); keep(); break}
+    case 'addphoto': pickPhoto(url=>{pendingPhoto=url; const p=document.getElementById('f-prev'); if(p) p.innerHTML=`<img class="avatar" src="${url}" alt="Aperçu de la photo">`; t.textContent='Changer la photo';}); break;
+    case 'stedit': studentSheet(d.id); break;
+    case 'bat': batizadoSheet(d.id); break;
+    case 'contrib': contribSheet(d.id); break;
+    case 'lvl':{const st=byId(d.st); setLevel(st,d.sk,+d.l); const y=window.scrollY; render(); window.scrollTo(0,y); break}
+    case 'edit': draft=null; go('edit',{id:d.id}); tab='sessions'; render(); break;
+    case 'new':{const id='n'+Date.now();sessions.push({id,date:sessions.some(s=>s.date===TODAY_ISO)?nextTraining(true):nextTraining(false),time:settings.time,title:'Nouvelle séance',done:false,present:[],blocks:[{p:'phys',title:'Échauffement',min:15,skills:[]},{p:'mus',title:'Musique',min:30,skills:[]}]});draft=null;go('edit',{id});tab='sessions';render();break}
+    case 'bmin': draft.blocks[d.i].min=Math.max(5,draft.blocks[d.i].min+ +d.d); keep(); break;
+    case 'bsk':{const b=draft.blocks[d.i];b.skills=b.skills.includes(d.sk)?b.skills.filter(x=>x!==d.sk):[...b.skills,d.sk];keep();break}
+    case 'bdel': draft.blocks.splice(d.i,1); keep(); break;
+    case 'bup':{const i=+d.i;[draft.blocks[i-1],draft.blocks[i]]=[draft.blocks[i],draft.blocks[i-1]];keep();break}
+    case 'badd': draft.blocks.push({p:'mouv',title:'Nouveau bloc',min:15,skills:[]}); keep(); break;
+    case 'save': case 'saveappel':{const i=sessions.findIndex(s=>s.id===draft.id);sessions[i]=draft;const id=draft.id;draft=null;
+      if(a==='saveappel'){appelSel=null;go('appel',{id});tab='home';render()}else{go('sessions');toast('Séance enregistrée')};break}
+    case 'appel': appelSel=null; go('appel',{id:d.id}); break;
+    case 'tog': appelSel.has(d.id)?appelSel.delete(d.id):appelSel.add(d.id); keep(); break;
+    case 'valid':{const s=sess(d.id);const was=s.done;s.present=[...appelSel];s.done=true;appelSel=null;if(was){toast(`Appel corrigé : ${s.present.length} présents`);draft=null;go('sessions');break}toast(`${s.present.length} présences enregistrées`);draft=null;go(s.date===TODAY_ISO?'home':'sessions');break}
+    case 'evaldone': toast('Niveaux mis à jour'); go('home'); break;
+    case 'seg': skillsTab=d.v; render(); break;
+    case 'skedit': skillSheet(d.id,{p:d.p,c:d.c}); break;
+    case 'skdel':{
+      if(!d.step){t.dataset.step='1';t.textContent='Confirmer la suppression';t.classList.remove('ghost');t.classList.add('danger');break}
+      const id=d.id; SKILLS.splice(SKILLS.findIndex(x=>x.id===id),1); delete S[id];
+      sessions.forEach(se=>se.blocks.forEach(b=>b.skills=b.skills.filter(x=>x!==id)));
+      if(draft) draft.blocks.forEach(b=>b.skills=b.skills.filter(x=>x!==id));
+      closeSheet(); toast('Compétence supprimée'); keep(); break}
+  }
+});
+function keep(sel){const y=window.scrollY;render(sel);window.scrollTo(0,y)}
+document.addEventListener('input',e=>{
+  const t=e.target, a=t.dataset.act;
+  if(t.id==='q'){filter=t.value;const pos=t.selectionStart;render();const q=document.getElementById('q');q.focus();q.setSelectionRange(pos,pos);return}
+  if(!draft&&a!=='notes') return;
+  if(a==='ttl') draft.title=t.value; if(a==='dt') draft.date=t.value; if(a==='tm') draft.time=t.value;
+  if(a==='bt') draft.blocks[t.dataset.i].title=t.value;
+  if(a==='notes') byId(t.dataset.id).notes=t.value;
+  if(a==='notes') scheduleSave();
+});
+document.addEventListener('change',e=>{const t=e.target;
+  if(t.dataset.set==='day'){const v=+t.value;settings.days=t.checked?[...new Set([...settings.days,v])]:settings.days.filter(x=>x!==v);scheduleSave();return}
+  if(t.dataset.set==='time'){settings.time=t.value||'19:30';scheduleSave();return}if(t.dataset.act==='bp'){const b=draft.blocks[t.dataset.i];b.p=t.value;b.skills=[];keep()}});
+document.addEventListener('submit',e=>{
+  e.preventDefault();
+  if(e.target.id==='importform'){ if(!pendingImport) return; applyState(pendingImport); pendingImport=null; closeSheet(false); toast('Sauvegarde importée'); go('home'); return}
+  if(e.target.id==='stform'){
+    const st=byId(e.target.dataset.id), ap=document.getElementById('s-ap').value.trim(), nom=document.getElementById('s-nom').value.trim();
+    if(!ap||!nom) return; Object.assign(st,{apelido:ap,nom,arrivee:document.getElementById('s-dt').value});
+    const was=st.status||'actif', ns=document.querySelector('input[name="s-status"]:checked').value; setStatus(st,ns,document.getElementById('s-snote').value.trim());
+    closeSheet(); toast(ns!==was?`${st.apelido} : ${STATUS[ns].toLowerCase()}`:'Fiche mise à jour'); keep(); return}
+  if(e.target.id==='batform'){
+    const st=byId(e.target.dataset.id), c=+document.getElementById('b-c').value;
+    st.hist.push({corda:c,date:document.getElementById('b-dt').value,event:document.getElementById('b-ev').value});
+    st.hist.sort((a,b)=>a.date.localeCompare(b.date)); st.corda=c;
+    closeSheet(); toast(`${st.apelido} passe en corde ${CORDAS[c].name.toLowerCase()}`); keep(); return}
+  if(e.target.id==='skillform'){
+    const name=document.getElementById('k-name').value.trim(); if(!name) return;
+    const p=document.getElementById('k-p').value, c=p==='contrib'?0:+document.getElementById('k-c').value, opt=document.getElementById('k-opt').checked;
+    const id=e.target.dataset.id;
+    if(id) Object.assign(S[id],{name,p,c,opt});
+    else {const nid='k'+Date.now(), sk={p,id:nid,name,c,opt}; SKILLS.push(sk); S[nid]=sk; students.forEach(st=>st.levels[nid]=0);}
+    refOpen.add(p==='contrib'?'contrib':'c'+c);
+    closeSheet(); toast(id?'Compétence modifiée':'Compétence ajoutée'); keep(); return}
+  if(e.target.id==='contribform'){const st=byId(e.target.dataset.id);const text=document.getElementById('c-txt').value.trim();if(!text)return;
+    st.contribs.push({date:document.getElementById('c-dt').value,text});closeSheet();toast('Contribution notée');keep();return}
+  const nom=document.getElementById('f-nom').value.trim(); if(!nom) return;
+  const ap=document.getElementById('f-ap').value.trim()||nom.split(' ')[0];
+  const st={id:'e'+Date.now(),apelido:ap,nom,arrivee:document.getElementById('f-dt').value,corda:+document.getElementById('f-c').value,levels:Object.fromEntries(SKILLS.map(s=>[s.id,0])),hist:[],assid:.8,color:AV[students.length%AV.length],notes:'',contribs:[],since:{},lvlHist:[]}; if(pendingPhoto){st.photo=pendingPhoto;pendingPhoto=null}
+  students.push(st); closeSheet(false); toast(`${ap} ajouté·e`); go('student',{id:st.id}); tab='students'; render();
+});
+// Flèches pour changer de niveau dans un groupe de boutons radio
+document.addEventListener('keydown',e=>{
+  const t=e.target; if(!t.getAttribute||t.getAttribute('role')!=='radio'||t.dataset.act!=='lvl') return;
+  const dir={ArrowRight:1,ArrowUp:1,ArrowLeft:-1,ArrowDown:-1}[e.key]; if(!dir) return;
+  e.preventDefault(); const st=byId(t.dataset.st), sk=t.dataset.sk, l=Math.max(0,Math.min(3,st.levels[sk]+dir)); setLevel(st,sk,l);
+  keep(`[data-act="lvl"][data-st="${st.id}"][data-sk="${sk}"][data-l="${l}"]`);
+});
+/* ---------- Démarrage ---------- */
+(async function init(){
+  try{ const st=await idbGet('state'); if(st) applyState(st); }
+  catch(e){ console.error(e); toast("Les données de ce téléphone n'ont pas pu être lues."); }
+  loaded=true;
+  if(navigator.storage&&navigator.storage.persist) navigator.storage.persist().catch(()=>{});
+  render();
+  if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(e=>console.warn('Service worker',e));
+})();
