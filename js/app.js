@@ -1,7 +1,7 @@
 /* Rueda de Sol — suivi des élèves. Une seule page, rendue en JS sans dépendance. */
 'use strict';
 /* ---------- Référentiels ---------- */
-const APP_VERSION='1.4.0';
+const APP_VERSION='1.4.1';
 const SCRIPT_BASE=document.currentScript?document.currentScript.src:location.href;
 const TODAY = new Date(); TODAY.setHours(12,0,0,0);
 const isoDay=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
@@ -711,7 +711,7 @@ function editor(){
       <div class="btns"><button class="btn primary" data-act="plan">Proposer une séance complète</button></div>`}
     ${adv.length?`<span class="eyebrow">${hasMid?'Blocs conseillés':'Ou ajoute les blocs un par un'}</span>
     <div class="stack" style="gap:0">${adv.map(a=>`<div class="adv-row"><i class="dot" style="background:${P[a.t.p].color}" aria-hidden="true"></i>
-      <div class="grow stack" style="gap:2px"><b>${esc(a.t.title)}</b>${a.fit?`<span><span class="pill ok">Idéal le ${weekday(draft.date)}</span></span>`:''}${a.why.length?'':`<span class="muted" style="font-size:.8125rem">Le groupe maîtrise déjà bien ces compétences.</span>`}${a.why.map(w=>`<span class="muted" style="font-size:.8125rem">${esc(w)}</span>`).join('')}</div>
+      <div class="grow stack" style="gap:2px"><b>${esc(a.t.title)}</b>${a.why.length?'':`<span class="muted" style="font-size:.8125rem">Le groupe maîtrise déjà bien ces compétences.</span>`}${a.why.map(w=>`<span class="muted" style="font-size:.8125rem">${esc(w)}</span>`).join('')}</div>
       <button class="btn" data-act="addlib" data-k="${a.t.k}" aria-label="Ajouter : ${esc(a.t.title)}">Ajouter</button></div>`).join('')}</div>`:''}
   </section>`}
   <div class="card" style="gap:8px"><div class="row between"><span class="eyebrow">Répartition</span><span class="num" style="font-weight:700">${fmtDur(draft.blocks)}</span></div>${draft.blocks.length?pillarBar(draft.blocks):''}${legend()}${(()=>{const d=split(draft.blocks);return d.cours===90&&d.mus===30?'':`<span style="font-size:0.8125rem"><span class="pill warn">À ajuster</span> Prévu : 1h30 de cours (dont 20 min d'échauffement) et 30 min de musique. Actuellement ${hm(d.cours)} et ${d.mus} min.</span>`})()}</div>
