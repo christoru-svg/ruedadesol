@@ -1,7 +1,7 @@
 /* Rueda de Sol — suivi des élèves. Une seule page, rendue en JS sans dépendance. */
 'use strict';
 /* ---------- Référentiels ---------- */
-const APP_VERSION='1.5.1';
+const APP_VERSION='1.5.2';
 const SCRIPT_BASE=document.currentScript?document.currentScript.src:location.href;
 const TODAY = new Date(); TODAY.setHours(12,0,0,0);
 const isoDay=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
@@ -563,10 +563,10 @@ function home(){
     <div class="stack" style="gap:4px;font-size:0.875rem">${t.blocks.map(b=>`<div class="row" style="gap:8px"><span class="num muted" style="min-width:3.75rem;white-space:nowrap">${b.min} min</span><span>${esc(b.title)}</span></div>`).join('')}</div>
     <div class="btns">${t.done?`<button class="btn" data-act="appel" data-id="${t.id}">Corriger l'appel</button><button class="btn primary" data-act="evalgo" data-id="${t.id}">Évaluer (facultatif)</button>`:`<button class="btn" data-act="edit" data-id="${t.id}">Modifier</button><button class="btn primary" data-act="appel" data-id="${t.id}">Faire l'appel</button>`}</div>
   </details>`:noSession(nxt)}
-  <section class="stack">
-    <div class="row between"><h2>Prochain batizado</h2><span class="muted" style="font-size:0.8125rem">1 an ou plus dans leur corde</span></div>
-    <div class="list">${ready.length?ready.map(({s,r})=>`<button class="li" data-act="student" data-id="${s.id}">${avatar(s)}<div class="grow"><div class="title">${esc(s.apelido)}</div><div class="sub row wrap" style="gap:6px">${cordaEl(s.corda)} → ${cordaEl(r.to)} <span>Contribution ${contribLabel(r.contrib).toLowerCase()} · référentiel ${r.acq.length}/${r.ref.length}</span></div></div><span class="pill ok num">${r.months} mois</span></button>`).join(''):`<div class="li muted">Personne n'a encore 1 an dans sa corde.</div>`}</div>
-  </section>
+  ${ready.length?`<section class="stale" role="note">
+    <span class="row" style="gap:8px"><span class="pill warn">Corde</span><span style="font-size:.875rem">${ready.length>1?`${ready.length} élèves peuvent changer de corde`:'Un·e élève peut changer de corde'}</span></span>
+    ${ready.map(({s,r})=>`<button class="adv-row ready-row" data-act="student" data-id="${s.id}">${avatar(s)}<div class="grow"><div class="title">${esc(s.apelido)}</div><div class="sub row wrap" style="gap:6px">${cordaEl(s.corda)} → ${cordaEl(r.to)} <span>Contribution ${contribLabel(r.contrib).toLowerCase()}</span></div></div></button>`).join('')}
+  </section>`:''}
   <section class="stack">
     <div class="row between"><h2>À relancer</h2><span class="muted" style="font-size:0.8125rem">Absents depuis 3 semaines ou plus</span></div>
     <div class="list">${absents.length?absents.map(s=>{const l=lastSeen(s);return `<button class="li" data-act="student" data-id="${s.id}">${avatar(s)}<div class="grow"><div class="title">${esc(s.apelido)}</div><div class="sub">Dernière venue : ${l?fmt(l):'jamais'}</div></div><span class="pill red num">${l?days(new Date(l),TODAY)+' j':'—'}</span></button>`}).join(''):`<div class="li muted">Tout le monde est venu récemment.</div>`}</div>

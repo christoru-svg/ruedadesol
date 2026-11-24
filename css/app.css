@@ -207,3 +207,6 @@ body.gated .app,body.gated .tabs{display:none}
 .stale .adv-row{border-top-color:color-mix(in srgb,var(--warn) 25%,transparent)}
 .adv-row .grow{flex:1;min-width:0}
 .stale .pill{white-space:nowrap}
+.ready-row{width:100%;padding:8px 0;background:none;border-left:0;border-right:0;border-bottom:0;text-align:left;color:inherit;font:inherit;cursor:pointer;align-items:center}
+.ready-row .title{font-weight:600}
+.ready-row .sub{font-size:.8125rem;color:var(--muted)}
