@@ -203,3 +203,7 @@ body.gated .app,body.gated .tabs{display:none}
 .adv-row .dot{margin-top:6px;flex:none}
 .adv-row .btn{flex:none}
 .block.fixed{background:var(--sunk)}
+.stale{display:flex;flex-direction:column;gap:6px;padding:12px;border-radius:10px;background:color-mix(in srgb,var(--warn) 10%,transparent);border:1px solid color-mix(in srgb,var(--warn) 35%,transparent)}
+.stale .adv-row{border-top-color:color-mix(in srgb,var(--warn) 25%,transparent)}
+.adv-row .grow{flex:1;min-width:0}
+.stale .pill{white-space:nowrap}

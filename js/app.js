@@ -1,7 +1,7 @@
 /* Rueda de Sol — suivi des élèves. Une seule page, rendue en JS sans dépendance. */
 'use strict';
 /* ---------- Référentiels ---------- */
-const APP_VERSION='1.4.1';
+const APP_VERSION='1.5.1';
 const SCRIPT_BASE=document.currentScript?document.currentScript.src:location.href;
 const TODAY = new Date(); TODAY.setHours(12,0,0,0);
 const isoDay=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
@@ -115,9 +115,9 @@ function buildSample(){
     return {id:'e'+i,apelido,nom,arrivee,corda,levels,hist,assid,color:AV[i%AV.length],notes:'',contribs,since,lvlHist};
   });
   // Séances : lundi (tatami) et mercredi (miroir), 8 dernières semaines
-  const PLANS={1:[[['acro',20],['equil',15],['coups',20],['roda',15]],[['acro',20],['chao',15],['angola',20],['roda',15]],[['acro',20],['floreio',15],['series',20],['roda',15]]],
-               3:[[['combo',20],['series',20],['roda',20],['cult',10]],[['miroir',15],['combo',20],['series',20],['roda',15]],[['combo',20],['series',25],['roda',25]]]};
-  const build=plan=>[mkBlock(WARM),...plan.map(([k,m])=>mkBlock(LIBK[k],m)),mkBlock(MUSIC)];
+  const PLANS={1:[[['acro',20],['equil',10],['coups',15],['roda',15]],[['acro',20],['chao',10],['angola',15],['roda',15]],[['acro',20],['floreio',10],['series',15],['roda',15]]],
+               3:[[['combo',20],['series',15],['roda',15],['cult',10]],[['miroir',10],['combo',15],['series',20],['roda',15]],[['combo',20],['series',20],['roda',20]]]};
+  const build=plan=>[mkBlock(WARM),...plan.map(([k,m])=>mkBlock(LIBK[k],m)),mkBlock(MUSIC),mkBlock(CLOSE)];
   let sid=0; const ses=[];
   for(let w=8;w>=0;w--){
     for(const dow of [1,3]){
@@ -128,7 +128,7 @@ function buildSample(){
       ses.push({id:'s'+(sid++),date:isoDay(d),time:settings.time,blocks:build(plan),present,done:true});
     }
   }
-  ses.push({id:'x-today',date:TODAY_ISO,time:settings.time,done:false,present:[],blocks:build([['miroir',15],['combo',20],['series',20],['roda',15]])});
+  ses.push({id:'x-today',date:TODAY_ISO,time:settings.time,done:false,present:[],blocks:build([['miroir',10],['combo',15],['series',20],['roda',15]])});
   ses.push({id:'x-next',date:nextTraining(true),time:settings.time,done:false,present:[],blocks:fixedBlocks()});
   const st=n=>sts.find(x=>x.apelido===n);
   Object.assign(st('Tatu'),{status:'pause',statusNote:'Blessure au genou, retour prévu en janvier'});
@@ -190,17 +190,20 @@ function balance(daysBack=30){
 }
 
 /* ---------- Séances : blocs modulables et conseils ---------- */
-// Chaque séance : 20 min d'échauffement et renforcement, 1h10 de blocs au choix, 30 min de musique.
+// Chaque séance : 20 min d'échauffement et renforcement, 1h de blocs au choix, 30 min de musique,
+// puis 10 min de salutation finale et d'étirements.
 const FOCUS={
   tatami:{name:'Tatami',long:'Tatami : acrobaties et jeu au sol',must:['acro']},
   miroir:{name:'Miroir et parquet',long:'Miroir et parquet : combos à deux, séries et roda',must:['combo','series','roda']},
 };
 const WARM={k:'warm',p:'phys',title:'Échauffement et renforcement musculaire',min:20,skills:['cardio','gainage','soupl'],fixed:'start'};
 const MUSIC={k:'mus',p:'mus',title:'Musique',min:30,skills:[],fixed:'end'};
+const CLOSE={k:'close',p:'phys',title:'Salutation finale et étirements',min:10,skills:['soupl'],fixed:'close'};
+const FIXED_LABEL={start:'Début de séance',end:'Après le cours',close:'Fin de séance'};
 const LIB=[
   {k:'acro',p:'mouv',title:'Acrobaties au sol : aú, rolê, negativa',min:20,skills:['au','role','negativa'],where:'tatami'},
-  {k:'equil',p:'mouv',title:'Bananeira et équilibres (facultatif)',min:15,skills:['bananeira','au'],where:'tatami'},
-  {k:'floreio',p:'mouv',title:'Macaco et floreios (facultatif)',min:15,skills:['macaco','au','role'],where:'tatami'},
+  {k:'equil',p:'mouv',title:'Bananeira et équilibres (facultatif)',min:15,skills:['bananeira','au'],where:'tatami',opt:true},
+  {k:'floreio',p:'mouv',title:'Macaco et floreios (facultatif)',min:15,skills:['macaco','au','role'],where:'tatami',opt:true},
   {k:'chao',p:'mouv',title:'Jeu au sol et transitions',min:15,skills:['negativa','role','cocor','esq','rast'],where:'tatami'},
   {k:'combo',p:'jeu',title:'Combos à deux : attaque et esquive',min:20,skills:['esq','armada','queix','mlc','martelo','bencao','cab','rast'],where:'miroir'},
   {k:'series',p:'jeu',title:'Séries du groupe',min:20,skills:['s1','s2','s3','s4'],where:'miroir'},
@@ -213,7 +216,7 @@ const LIB=[
   {k:'soupl',p:'phys',title:'Souplesse et étirements',min:10,skills:['soupl']},
   {k:'libre',p:'mouv',title:'Bloc libre',min:15,skills:[]},
 ];
-const LIBK=Object.fromEntries([WARM,MUSIC,...LIB].map(b=>[b.k,b]));
+const LIBK=Object.fromEntries([WARM,MUSIC,CLOSE,...LIB].map(b=>[b.k,b]));
 const weekday=date=>new Date(date+'T12:00:00').toLocaleDateString('fr-FR',{weekday:'long'});
 const cap=t=>t.charAt(0).toUpperCase()+t.slice(1);
 const dayFocus=date=>(settings.focus||{})[new Date(date+'T12:00:00').getDay()]||'';
@@ -226,7 +229,7 @@ function mkBlock(t,min){
   if(t.k==='series'){const s=b.skills.filter(x=>need(x)>0); if(s.length) b.skills=s;}
   return b;
 }
-const fixedBlocks=()=>[mkBlock(WARM),mkBlock(MUSIC)];
+const fixedBlocks=()=>[mkBlock(WARM),mkBlock(MUSIC),mkBlock(CLOSE)];
 /* Conseils : quels blocs ajouter, et pourquoi.
    Score = besoin du groupe (compétences pas encore acquises, pondérées par le temps depuis le dernier travail)
          + orientation du jour (tatami ou miroir) + rattrapage d'un pilier délaissé ce mois-ci. */
@@ -246,9 +249,23 @@ function advice(d){
     return {t,score,why,fit};
   }).sort((a,b)=>b.score-a.score);
 }
-/* Séance complète proposée : échauffement, blocs du jour, blocs conseillés, roda, musique. 1h10 de blocs. */
+/* Alerte : blocs pas travaillés depuis 3 semaines (environ 6 séances).
+   Ignore les blocs facultatifs, les blocs de tatami un jour sans tatami, et ceux déjà dans la séance.
+   Pas d'alerte tant qu'il n'y a pas 3 semaines d'historique. */
+const STALE=21;
+function staleBlocks(d){
+  const ds=done(); const ref=new Date(d.date+'T12:00:00');
+  if(!ds.length||days(new Date(ds[0].date+'T12:00:00'),ref)<STALE) return [];
+  const f=dayFocus(d.date), have=new Set(d.blocks.map(b=>b.k));
+  return LIB.filter(t=>t.k!=='libre'&&!t.opt&&!have.has(t.k)&&!(t.where==='tatami'&&f!=='tatami')).map(t=>{
+    const l=ds.filter(se=>se.date<d.date&&se.blocks.some(b=>b.k===t.k)).pop();
+    return {t,since:l?days(new Date(l.date+'T12:00:00'),ref):null};
+  }).filter(x=>x.since==null||x.since>=STALE).sort((a,b)=>(b.since??1e9)-(a.since??1e9));
+}
+const sinceTxt=n=>n==null?'jamais travaillé':`pas travaillé depuis ${n>=14?Math.round(n/7)+' semaines':n+' jours'}`;
+/* Séance complète proposée : échauffement, blocs du jour, blocs conseillés, roda, musique, salutation. 1h de blocs. */
 function proposePlan(d){
-  const f=dayFocus(d.date), mid=[]; let left=70;
+  const f=dayFocus(d.date), mid=[]; let left=60;
   const add=k=>{const t=LIBK[k]; if(!t||mid.some(b=>b.k===k)) return; const m=Math.min(t.min,left); if(m<10) return; mid.push(mkBlock(t,m)); left-=m};
   ((FOCUS[f]&&FOCUS[f].must)||[]).forEach(add);
   const ranked=advice({date:d.date,blocks:mid});
@@ -258,7 +275,7 @@ function proposePlan(d){
   if(roda){ left+=15; add('roda'); }
   mid.sort((a,b)=>(a.k==='roda')-(b.k==='roda'));
   if(left>0&&mid.length) mid[mid.length-1].min+=left;
-  d.blocks=[mkBlock(WARM),...mid,mkBlock(MUSIC)];
+  d.blocks=[mkBlock(WARM),...mid,mkBlock(MUSIC),mkBlock(CLOSE)];
 }
 /* Une séance n'a pas de titre : on la résume par ses blocs principaux. */
 function sessionLabel(s){
@@ -319,7 +336,7 @@ function cloudFail(e){
   console.error(e);
   if(!navigator.onLine){cloud.status='offline';return}
   cloud.status='error';
-  cloud.error=e&&e.message==='trop-gros'?"les données dépassent la taille maximale d'une copie en ligne":e&&e.code==='permission-denied'?"accès refusé (vérifie les règles Firestore)":"la copie en ligne n'a pas pu être mise à jour";
+  cloud.error=e&&e.code==='unavailable'?"la base en ligne ne répond pas (vérifie que Firestore Database est bien créée dans Firebase)":e&&e.message==='trop-gros'?"les données dépassent la taille maximale d'une copie en ligne":e&&e.code==='permission-denied'?"accès refusé (vérifie les règles Firestore)":"la copie en ligne n'a pas pu être mise à jour";
 }
 async function cloudPull(){
   const st=await cloud.mod.pull(cloud.user.uid);
@@ -330,18 +347,20 @@ async function cloudPull(){
 }
 async function cloudPush(){
   if(!cloud.user||!cloud.mod) return;
-  clearTimeout(pushT); pushT=null; cloud.status='syncing'; refreshCloud();
+  clearTimeout(pushT); pushT=null;
+  if(sample){ cloud.status='sample'; refreshCloud(); return; } // les données d'exemple ne partent jamais en ligne
+  cloud.status='syncing'; refreshCloud();
   try{ await cloud.mod.push(cloud.user.uid,JSON.parse(JSON.stringify(snapshot())),sentPhotos); syncUid=cloud.user.uid; await saveMeta(); cloud.status='ok'; cloud.lastSync=Date.now(); }
   catch(e){ cloudFail(e); }
   refreshCloud();
 }
-function schedulePush(){ if(!cloud.user) return; clearTimeout(pushT); pushT=setTimeout(cloudPush,2000); }
+function schedulePush(){ if(!cloud.user||sample) return; clearTimeout(pushT); pushT=setTimeout(cloudPush,2000); }
 async function cloudConnect(){
   if(!cloud.user||!cloud.mod) return;
   cloud.status='syncing'; refreshCloud();
   try{
     const remote=await cloud.mod.remoteStamp(cloud.user.uid);
-    const hasLocal=students.length||archived.length||sessions.length;
+    const hasLocal=!sample&&(students.length||archived.length||sessions.length);
     if(!remote){ await cloudPush(); }
     else if(syncUid!==cloud.user.uid){ if(hasLocal){ mergeSheet(remote); cloud.status='off'; } else await cloudPull(); }
     else if((remote.localSavedAt||0)>localSavedAt){ await cloudPull(); toast('Données mises à jour depuis la copie en ligne'); }
@@ -367,9 +386,9 @@ function accountCard(){
   const head='<section class="card"><h2>Compte en ligne</h2>';
   if(!cloud.enabled) return head+`<span class="muted" style="font-size:.875rem">La copie en ligne n'est pas encore configurée pour cette appli.</span></section>`;
   if(!cloud.user) return head+`<span class="muted" style="font-size:.875rem">${cloud.status==='offline'?'Pas de réseau : la connexion au compte sera possible au retour du réseau. Tes données restent sur ce téléphone.':'Chargement…'}</span></section>`;
-  const st={syncing:'Synchronisation en cours…',ok:`Copie en ligne à jour${cloud.lastSync?' ('+new Date(cloud.lastSync).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})+')':''}.`,offline:'Hors ligne : la copie en ligne sera mise à jour au retour du réseau.',error:`Échec : ${cloud.error}.`,off:'En attente de ton choix.'}[cloud.status]||'';
+  const st={syncing:'Synchronisation en cours…',ok:`Copie en ligne à jour${cloud.lastSync?' ('+new Date(cloud.lastSync).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})+')':''}.`,offline:'Hors ligne : la copie en ligne sera mise à jour au retour du réseau.',error:`Échec : ${cloud.error}.`,off:'En attente de ton choix.',sample:"Données d'exemple : elles ne sont pas envoyées en ligne. Efface-les pour commencer avec tes vrais élèves."}[cloud.status]||'';
   return head+`<span>Connecté·e : <b>${esc(cloud.user.email||'')}</b></span>
-    <span class="row" style="gap:8px;font-size:.875rem"><span class="pill ${cloud.status==='ok'?'ok':cloud.status==='error'?'red':'warn'}">${cloud.status==='ok'?'À jour':cloud.status==='error'?'Échec':cloud.status==='syncing'?'En cours':'En attente'}</span><span class="muted">${esc(st)}</span></span>
+    <span class="row" style="gap:8px;font-size:.875rem"><span class="pill ${cloud.status==='ok'?'ok':cloud.status==='error'?'red':'warn'}">${cloud.status==='ok'?'À jour':cloud.status==='error'?'Échec':cloud.status==='syncing'?'En cours':cloud.status==='sample'?'Exemple':'En attente'}</span><span class="muted">${esc(st)}</span></span>
     <div class="btns"><button class="btn" data-act="logout">Se déconnecter</button><button class="btn primary" data-act="syncnow">Synchroniser maintenant</button></div></section>`;
 }
 
@@ -693,9 +712,11 @@ function sessionsList(){
 
 let draft=null;
 function editor(){
-  if(!draft||draft.id!==view.id) draft=JSON.parse(JSON.stringify(sess(view.id)));
+  if(!draft||draft.id!==view.id){ draft=JSON.parse(JSON.stringify(sess(view.id)));
+    if(!draft.done&&draft.blocks.some(b=>b.fixed==='start')&&!draft.blocks.some(b=>b.k==='close')) draft.blocks.push(mkBlock(CLOSE)); }
   const f=dayFocus(draft.date), hasMid=draft.blocks.some(b=>!b.fixed);
-  const adv=draft.done?[]:advice(draft).slice(0,3);
+  const stale=draft.done?[]:staleBlocks(draft); const staleK=new Set(stale.map(x=>x.t.k));
+  const adv=draft.done?[]:advice(draft).filter(a=>!staleK.has(a.t.k)).slice(0,3);
   const chips=b=>{const ids=[...new Set([...((LIBK[b.k]||{}).skills||[]),...b.skills,...SKILLS.filter(s=>s.p===b.p).map(s=>s.id)])].filter(id=>S[id]);
     return ids.map(id=>`<button class="chip${b.skills.includes(id)?' on':''}" data-act="bsk" data-i="${draft.blocks.indexOf(b)}" data-sk="${id}" aria-pressed="${b.skills.includes(id)}">${esc(S[id].name)}</button>`).join('')};
   const firstMovable=draft.blocks[0]&&draft.blocks[0].fixed==='start'?1:0;
@@ -709,14 +730,18 @@ function editor(){
     <h2>Que travailler ?</h2>
     ${hasMid?'':`<p style="margin:0">${f==='tatami'?cap(weekday(draft.date))+', tatami : la séance met l\'accent sur le sol et les acrobaties (toujours facultatives).':f==='miroir'?'Miroir, parquet et souvent plus de monde : la séance met l\'accent sur les combos à deux, les séries et la roda.':''} Le reste dépend de ce que le groupe n'a pas encore acquis et de ce qui n'a pas été travaillé depuis longtemps.</p>
       <div class="btns"><button class="btn primary" data-act="plan">Proposer une séance complète</button></div>`}
+    ${stale.length?`<div class="stale" role="note"><span class="row" style="gap:8px"><span class="pill warn">À reprendre</span><span style="font-size:.875rem">${stale.length>1?`${stale.length} blocs pas travaillés depuis 3 semaines ou plus`:'Un bloc pas travaillé depuis 3 semaines ou plus'}</span></span>
+      <div class="stack" style="gap:0">${stale.map(x=>`<div class="adv-row"><i class="dot" style="background:${P[x.t.p].color}" aria-hidden="true"></i>
+        <div class="grow stack" style="gap:2px"><b>${esc(x.t.title)}</b><span class="muted" style="font-size:.8125rem">${cap(sinceTxt(x.since))}</span></div>
+        <button class="btn" data-act="addlib" data-k="${x.t.k}" aria-label="Ajouter : ${esc(x.t.title)}">Ajouter</button></div>`).join('')}</div></div>`:''}
     ${adv.length?`<span class="eyebrow">${hasMid?'Blocs conseillés':'Ou ajoute les blocs un par un'}</span>
     <div class="stack" style="gap:0">${adv.map(a=>`<div class="adv-row"><i class="dot" style="background:${P[a.t.p].color}" aria-hidden="true"></i>
       <div class="grow stack" style="gap:2px"><b>${esc(a.t.title)}</b>${a.why.length?'':`<span class="muted" style="font-size:.8125rem">Le groupe maîtrise déjà bien ces compétences.</span>`}${a.why.map(w=>`<span class="muted" style="font-size:.8125rem">${esc(w)}</span>`).join('')}</div>
       <button class="btn" data-act="addlib" data-k="${a.t.k}" aria-label="Ajouter : ${esc(a.t.title)}">Ajouter</button></div>`).join('')}</div>`:''}
   </section>`}
-  <div class="card" style="gap:8px"><div class="row between"><span class="eyebrow">Répartition</span><span class="num" style="font-weight:700">${fmtDur(draft.blocks)}</span></div>${draft.blocks.length?pillarBar(draft.blocks):''}${legend()}${(()=>{const d=split(draft.blocks);return d.cours===90&&d.mus===30?'':`<span style="font-size:0.8125rem"><span class="pill warn">À ajuster</span> Prévu : 1h30 de cours (dont 20 min d'échauffement) et 30 min de musique. Actuellement ${hm(d.cours)} et ${d.mus} min.</span>`})()}</div>
+  <div class="card" style="gap:8px"><div class="row between"><span class="eyebrow">Répartition</span><span class="num" style="font-weight:700">${fmtDur(draft.blocks)}</span></div>${draft.blocks.length?pillarBar(draft.blocks):''}${legend()}${(()=>{const d=split(draft.blocks);return d.cours===90&&d.mus===30?'':`<span style="font-size:0.8125rem"><span class="pill warn">À ajuster</span> Prévu : 1h30 de cours (20 min d'échauffement, 1h de blocs, 10 min de salutation finale) et 30 min de musique. Actuellement ${hm(d.cours)} et ${d.mus} min.</span>`})()}</div>
   ${draft.blocks.map((b,i)=>`<div class="block${b.fixed?' fixed':''}">
-    <div class="block-head">${b.fixed?`<span class="eyebrow" style="color:${P[b.p].color}">${b.fixed==='start'?'Début de séance':'Fin de séance'}</span>`:`<select class="input" style="width:auto;flex:none;color:${P[b.p].color};font-weight:700" data-act="bp" data-i="${i}" aria-label="Pilier" id="bp-${i}">${SPILL.map(p=>`<option value="${p.id}"${p.id===b.p?' selected':''}>${p.name}</option>`).join('')}</select>`}
+    <div class="block-head">${b.fixed?`<span class="eyebrow" style="color:${P[b.p].color}">${FIXED_LABEL[b.fixed]||''}</span>`:`<select class="input" style="width:auto;flex:none;color:${P[b.p].color};font-weight:700" data-act="bp" data-i="${i}" aria-label="Pilier" id="bp-${i}">${SPILL.map(p=>`<option value="${p.id}"${p.id===b.p?' selected':''}>${p.name}</option>`).join('')}</select>`}
       <span style="flex:1"></span>
       ${b.fixed?'':`<button class="iconbtn" data-act="bup" data-i="${i}" aria-label="Monter" ${i>firstMovable?'':'disabled'}>↑</button>
       <button class="iconbtn" data-act="bdel" data-i="${i}" aria-label="Supprimer le bloc">✕</button>`}</div>
@@ -729,7 +754,8 @@ function editor(){
 }
 function libSheet(){
   const f=dayFocus(draft.date), have=new Set(draft.blocks.map(b=>b.k));
-  const row=t=>`<button class="li" data-act="addlib" data-k="${t.k}"><i class="dot" style="background:${P[t.p].color}" aria-hidden="true"></i><div class="grow"><div class="title">${esc(t.title)}</div><div class="sub">${P[t.p].name} · ${t.min} min${have.has(t.k)?' · déjà dans la séance':''}</div></div></button>`;
+  const staleMap=Object.fromEntries(staleBlocks(draft).map(x=>[x.t.k,x.since])), staleK=new Set(Object.keys(staleMap));
+  const row=t=>`<button class="li" data-act="addlib" data-k="${t.k}"><i class="dot" style="background:${P[t.p].color}" aria-hidden="true"></i><div class="grow"><div class="title">${esc(t.title)}</div><div class="sub">${P[t.p].name} · ${t.min} min${have.has(t.k)?' · déjà dans la séance':staleK.has(t.k)?` · <span style="color:var(--warn)">${sinceTxt(staleMap[t.k])}</span>`:''}</div></div></button>`;
   const fl=f?LIB.filter(t=>t.where===f):[], other=LIB.filter(t=>!fl.includes(t));
   openSheet(`<div class="sheet" aria-label="Ajouter un bloc"><h2>Ajouter un bloc</h2>
     ${fl.length?`<span class="eyebrow">Conseillés ce jour-là : ${esc(FOCUS[f].name.toLowerCase())}</span><div class="list">${fl.map(row).join('')}</div>`:''}
