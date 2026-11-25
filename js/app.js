@@ -1,7 +1,7 @@
 /* Rueda de Sol — suivi des élèves. Une seule page, rendue en JS sans dépendance. */
 'use strict';
 /* ---------- Référentiels ---------- */
-const APP_VERSION='1.5.2';
+const APP_VERSION='1.6.0';
 const SCRIPT_BASE=document.currentScript?document.currentScript.src:location.href;
 const TODAY = new Date(); TODAY.setHours(12,0,0,0);
 const isoDay=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
@@ -19,11 +19,17 @@ const P = Object.fromEntries(PILLARS.map(p=>[p.id,p]));
 const LEVELS = ['Découverte','En cours','Acquis','Maîtrisé'];
 const SKILLS = [
   // c = corde pendant laquelle on travaille la compétence (0 = débutant sans corde, 1 = corde blanche…)
-  ['mouv','ginga','Ginga',0],['mouv','esq','Esquivas (lateral, baixa)',0],['mouv','cocor','Cocorinha',0],['mouv','negativa','Negativa',0],
-  ['mouv','mlf','Meia-lua de frente',0],['mouv','au','Aú',0],
-  ['mouv','bencao','Bênção',1],['mouv','armada','Armada',1],['mouv','queix','Queixada',1],['mouv','role','Rolê',1],
-  ['mouv','martelo','Martelo',2],['mouv','mlc','Meia-lua de compasso',2],['mouv','cab','Cabeçada',2],['mouv','bananeira','Bananeira (équilibre)',2,1],
-  ['mouv','rast','Rasteira',3],['mouv','macaco','Macaco',4,1],
+  // Mouvements par paliers de deux cordes : c = première corde du palier, c2 = dernière. Facultatifs à partir de la rouge.
+  ['mouv','ginga','Ginga',0,0,1],['mouv','esq','Esquivas (dont cocorinha)',0,0,1],['mouv','negativa','Negativa',0,0,1],
+  ['mouv','mlf','Meia-lua de frente',0,0,1],['mouv','bencao','Bênção',0,0,1],['mouv','role','Rolê',0,0,1],
+  ['mouv','doppio','Doppio',0,0,1],['mouv','dentrofora','Coups de pied circulaires de dentro et de fora',0,0,1],
+  ['mouv','molla','Molla',0,0,1],['mouv','delado','De lado',0,0,1],['mouv','ponteira','Ponteira',0,0,1],
+  ['mouv','queix','Queixada',2,1,3],['mouv','martelo','Martelo',2,1,3],['mouv','cab','Cabeçada',2,1,3],['mouv','bananeira','Bananeira',2,1,3],
+  ['mouv','au','Aú',2,1,3],['mouv','mlc','Meia-lua de compasso',2,1,3],['mouv','cp1','Premier coup de pied',2,1,3],['mouv','cp2','Deuxième coup de pied',2,1,3],
+  ['mouv','rast','Rasteira',4,1,5],['mouv','ponte','Ponte',4,1,5],['mouv','aufech','Aú fechado',4,1,5],['mouv','auesq','Aú esquadro',4,1,5],
+  ['mouv','marchao','Martelo no chão',4,1,5],['mouv','queda','Queda de rins',4,1,5],['mouv','armada','Armada',4,1,5],
+  ['mouv','au1in',"Aú d'une main, main intérieure",6,1,7],['mouv','corta','Corta-capim',6,1,7],['mouv','banchao','Bananeira no chão',6,1,7],
+  ['mouv','macaco','Macaco',8,1],['mouv','au1out',"Aú d'une main, main extérieure",8,1],
   ['jeu','palmas','Battre des mains en rythme dans la roda',0],['jeu','roda','Entrer et sortir de la roda',0],
   ['jeu','s1','Série 1 du groupe',1],['jeu','regional','Jogo de Regional',1],
   ['jeu','s2','Série 2 du groupe',2],['jeu','angola','Jogo de Angola',2],
@@ -39,10 +45,15 @@ const SKILLS = [
   ['cult','rituels','Rituels de la roda',3],['cult','trad','Comprendre les cantigas',4],
   ['phys','soupl','Souplesse',0],['phys','gainage','Gainage',0],['phys','cardio','Endurance',1],
   // Contribution au groupe : valable à tous les niveaux
-  ['contrib','accueil','Accueillir et héberger les visiteurs',0],['contrib','entraide','Accompagner les débutants',0],
-  ['contrib','orga','Aider à organiser (batizado, rodas, voyages)',0],['contrib','instru','Entretenir ou fabriquer les instruments',0],
-  ['contrib','transmission','Animer une partie du cours',0],['contrib','vie','Venir aux rodas et événements',0],
-].map(([p,id,name,c,opt])=>({p,id,name,c,opt:!!opt}));
+  ['contrib','accueil','Accueillir et héberger les visiteurs',0],
+  ['contrib','anim','Animer la vie du groupe (verres, activités en dehors des entraînements)',0],
+  ['contrib','entraide','Accompagner les débutants',0],
+  ['contrib','orga','Aider à organiser (comptabilité, voyages, logistique, événements)',0],
+  ['contrib','seance','Aider au bon déroulé des séances (instruments, clés des salles)',0],
+  ['contrib','transmission','Animer une partie du cours',0],
+  ['contrib','events','Participer aux événements (France ou étranger)',0],
+].map(([p,id,name,c,opt,c2])=>Object.assign({p,id,name,c,opt:!!opt},c2!=null?{c2}:{}));
+const REF_V=2; // version du référentiel par défaut (migration dans applyState)
 const DEFAULT_SKILLS = JSON.parse(JSON.stringify(SKILLS));
 const S = Object.fromEntries(SKILLS.map(s=>[s.id,s]));
 const LEVELS_C = ['Pas encore','Parfois','Souvent','Pilier'];
@@ -163,7 +174,7 @@ const contribLabel=v=>v>=2.5?'Très forte':v>=1.8?'Forte':v>=1?'Moyenne':'Discr�
 function readiness(st){
   if(!STEPS[st.corda+1]) return null;
   const since=lastCorda(st); const months=Math.floor((TODAY-new Date(since+'T12:00:00'))/(864e5*30.4));
-  const ref=SKILLS.filter(s=>s.c===st.corda&&!s.opt&&s.p!=='contrib'); const acq=ref.filter(s=>st.levels[s.id]>=2);
+  const ref=SKILLS.filter(s=>s.c<=st.corda&&st.corda<=(s.c2??s.c)&&!s.opt&&s.p!=='contrib'); const acq=ref.filter(s=>st.levels[s.id]>=2);
   return {to:st.corda+1,since,months,eligible:months>=12,ref,acq,contrib:pillarAvg(st,'contrib'),pres:rate(st)};
 }
 const hm=m=>m>=60?`${Math.floor(m/60)}h${m%60?String(m%60).padStart(2,'0'):''}`:`${m} min`;
@@ -202,16 +213,16 @@ const CLOSE={k:'close',p:'phys',title:'Salutation finale et étirements',min:10,
 const FIXED_LABEL={start:'Début de séance',end:'Après le cours',close:'Fin de séance'};
 const LIB=[
   {k:'acro',p:'mouv',title:'Acrobaties au sol : aú, rolê, negativa',min:20,skills:['au','role','negativa'],where:'tatami'},
-  {k:'equil',p:'mouv',title:'Bananeira et équilibres (facultatif)',min:15,skills:['bananeira','au'],where:'tatami',opt:true},
-  {k:'floreio',p:'mouv',title:'Macaco et floreios (facultatif)',min:15,skills:['macaco','au','role'],where:'tatami',opt:true},
-  {k:'chao',p:'mouv',title:'Jeu au sol et transitions',min:15,skills:['negativa','role','cocor','esq','rast'],where:'tatami'},
+  {k:'equil',p:'mouv',title:'Bananeira et équilibres (facultatif)',min:15,skills:['bananeira','banchao','au','aufech','auesq'],where:'tatami',opt:true},
+  {k:'floreio',p:'mouv',title:'Macaco et floreios (facultatif)',min:15,skills:['macaco','au1in','au1out','queda','ponte'],where:'tatami',opt:true},
+  {k:'chao',p:'mouv',title:'Jeu au sol et transitions',min:15,skills:['negativa','role','esq','delado','molla','rast','marchao','corta'],where:'tatami'},
   {k:'combo',p:'jeu',title:'Combos à deux : attaque et esquive',min:20,skills:['esq','armada','queix','mlc','martelo','bencao','cab','rast'],where:'miroir'},
   {k:'series',p:'jeu',title:'Séries du groupe',min:20,skills:['s1','s2','s3','s4'],where:'miroir'},
-  {k:'miroir',p:'mouv',title:'Technique au miroir : ginga et coups de pied',min:15,skills:['ginga','mlf','armada','bencao','queix'],where:'miroir'},
+  {k:'miroir',p:'mouv',title:'Technique au miroir : ginga et coups de pied',min:15,skills:['ginga','mlf','dentrofora','ponteira','bencao','queix','armada'],where:'miroir'},
   {k:'roda',p:'jeu',title:'Roda',min:20,skills:['roda','palmas','regional','angola','coro'],where:'miroir'},
   {k:'angola',p:'jeu',title:'Jogo de Angola : chamada et malícia',min:20,skills:['angola','chamada','malicia']},
-  {k:'coups',p:'mouv',title:'Coups de pied tournants',min:20,skills:['armada','queix','mlc','martelo']},
-  {k:'esquivas',p:'mouv',title:'Ginga, esquivas et déplacements',min:15,skills:['ginga','esq','cocor']},
+  {k:'coups',p:'mouv',title:'Coups de pied tournants',min:20,skills:['dentrofora','queix','mlc','martelo','cp1','cp2','armada']},
+  {k:'esquivas',p:'mouv',title:'Ginga, esquivas et déplacements',min:15,skills:['ginga','esq','delado','doppio']},
   {k:'cult',p:'cult',title:'Culture : histoire, mestres, rituels',min:10,skills:['hist','mestres','rituels','port']},
   {k:'soupl',p:'phys',title:'Souplesse et étirements',min:10,skills:['soupl']},
   {k:'libre',p:'mouv',title:'Bloc libre',min:15,skills:[]},
@@ -293,16 +304,32 @@ function nextTraining(strictlyAfter){
   for(let k=strictlyAfter?1:0;k<=7;k++){const x=new Date(TODAY);x.setDate(d.getDate()+k);if(settings.days.includes(x.getDay()))return isoDay(x)}
   return TODAY_ISO;
 }
+/* Référentiel v2 (nov. 2026) : nouveaux mouvements par paliers et nouvelle contribution.
+   Les compétences ajoutées à la main sont gardées ; les niveaux notés suivent quand une compétence est fusionnée ou renommée. */
+const OLD_REF=['ginga','esq','cocor','negativa','mlf','au','bencao','armada','queix','role','martelo','mlc','cab','bananeira','rast','macaco',
+  'accueil','entraide','orga','instru','transmission','vie'];
+const REF_MAP={cocor:'esq',instru:'seance',vie:'events'};
+function migrateRef(people){
+  const keep=SKILLS.filter(s=>!((s.p==='mouv'||s.p==='contrib')&&OLD_REF.includes(s.id)));
+  const fresh=JSON.parse(JSON.stringify(DEFAULT_SKILLS)).filter(s=>s.p==='mouv'||s.p==='contrib');
+  SKILLS.splice(0,SKILLS.length,...fresh.filter(s=>s.p==='mouv'),...keep.filter(s=>!fresh.some(f=>f.id===s.id)),...fresh.filter(s=>s.p==='contrib'));
+  people.forEach(x=>{
+    const lv=x.levels||{};
+    Object.entries(REF_MAP).forEach(([a,b])=>{ if(lv[a]>(lv[b]||0)){ lv[b]=lv[a]; if(x.since&&x.since[a]) x.since[b]=x.since[a]; } delete lv[a]; if(x.since) delete x.since[a]; });
+    (x.lvlHist||[]).forEach(h=>{ if(REF_MAP[h.sk]) h.sk=REF_MAP[h.sk]; });
+  });
+}
 function snapshot(){return {app:'rueda-de-sol',v:1,savedAt:new Date().toISOString(),localSavedAt,students,archived,sessions,skills:SKILLS,settings,sample}}
 function applyState(st){
   students.splice(0,students.length,...(st.students||[]));
   archived.splice(0,archived.length,...(st.archived||[]));
   sessions.splice(0,sessions.length,...(st.sessions||[]));
   SKILLS.splice(0,SKILLS.length,...(st.skills&&st.skills.length?st.skills:JSON.parse(JSON.stringify(DEFAULT_SKILLS))));
+  const old=st.settings||{};
+  if(st.skills&&st.skills.length&&(old.refV||1)<REF_V) migrateRef([...(st.students||[]),...(st.archived||[])]);
   Object.keys(S).forEach(k=>delete S[k]); SKILLS.forEach(s=>S[s.id]=s);
   [...students,...archived].forEach(x=>{x.levels=x.levels||{};x.since=x.since||{};x.lvlHist=x.lvlHist||[];x.contribs=x.contribs||[];x.hist=x.hist||[];SKILLS.forEach(s=>{if(x.levels[s.id]==null)x.levels[s.id]=0})});
-  const old=st.settings||{};
-  settings=Object.assign({days:[1,3],time:'19:30',lastExport:null},old);
+  settings=Object.assign({days:[1,3],time:'19:30',lastExport:null},old,{refV:REF_V});
   // anciens réglages par défaut (mardi et jeudi) : passage au lundi (tatami) et mercredi (miroir)
   if(!old.focus){ if(String(old.days)==='2,4') settings.days=[1,3]; settings.focus={1:'tatami',3:'miroir'}; }
   sample=!!st.sample;
@@ -796,7 +823,7 @@ function skillsPage(){
     </details>
     ${CORDAS.map((k,i)=>{const sk=SKILLS.filter(s=>s.c===i&&s.p!=='contrib');if(i>8)return '';const concern=students.filter(st=>st.corda>=i);
       return `<details class="card lvl" data-k="c${i}"${refOpen.has('c'+i)?' open':''}><summary class="row"><span class="row grow" style="gap:10px;flex:1;min-width:0">${cordaEl(i)}<span class="stack" style="gap:0"><b>${i===0?'Débutant':'Corde '+k.name.toLowerCase()}</b><span class="muted" style="font-size:0.8125rem">${i===0?'Sans corde, vers la blanche':'Vers la corde '+CORDAS[i+1].name.toLowerCase()}</span></span></span><span class="muted num" style="font-size:0.8125rem">${sk.length} compétences</span></summary>
-      ${PILLARS.filter(p=>sk.some(s=>s.p===p.id)).map(p=>`<div class="stack" style="gap:0"><span class="eyebrow row" style="gap:6px;padding-top:4px"><i class="dot" style="background:${p.color}"></i>${p.name}</span>${sk.filter(s=>s.p===p.id).map(s=>{const n=concern.filter(st=>st.levels[s.id]>=2).length;return `<div class="skillrow"><button class="skbtn" data-act="skedit" data-id="${s.id}">${esc(s.name)}${s.opt?' <span class="pill warn" style="font-size:0.75rem">Facultatif</span>':''}<span class="pen" aria-hidden="true">✎</span></button><div class="progress" style="width:70px;flex:none"><span style="width:${concern.length?100*n/concern.length:0}%;background:${p.color}"></span></div><span class="muted num" style="font-size:0.8125rem;min-width:2.75rem;text-align:right;white-space:nowrap">${n}/${concern.length}</span></div>`}).join('')}</div>`).join('')}
+      ${PILLARS.filter(p=>sk.some(s=>s.p===p.id)).map(p=>`<div class="stack" style="gap:0"><span class="eyebrow row" style="gap:6px;padding-top:4px"><i class="dot" style="background:${p.color}"></i>${p.name}${(()=>{const c2=Math.max(...sk.filter(s=>s.p===p.id).map(s=>s.c2??s.c));return c2>i?(i===0?' · débutants et corde blanche':` · cordes ${k.name.toLowerCase()} et ${CORDAS[c2].name.toLowerCase()}`):''})()}</span>${sk.filter(s=>s.p===p.id).map(s=>{const n=concern.filter(st=>st.levels[s.id]>=2).length;return `<div class="skillrow"><button class="skbtn" data-act="skedit" data-id="${s.id}">${esc(s.name)}${s.opt?' <span class="pill warn" style="font-size:0.75rem">Facultatif</span>':''}<span class="pen" aria-hidden="true">✎</span></button><div class="progress" style="width:70px;flex:none"><span style="width:${concern.length?100*n/concern.length:0}%;background:${p.color}"></span></div><span class="muted num" style="font-size:0.8125rem;min-width:2.75rem;text-align:right;white-space:nowrap">${n}/${concern.length}</span></div>`}).join('')}</div>`).join('')}
       ${sk.length?'':'<span class="muted" style="font-size:0.8125rem">Aucune compétence pour l\'instant.</span>'}
       <button class="btn ghost" style="align-self:flex-start" data-act="skedit" data-c="${i}">+ Ajouter à ce niveau</button>
       </details>`}).join('')}
@@ -973,7 +1000,7 @@ document.addEventListener('submit',e=>{
     const name=document.getElementById('k-name').value.trim(); if(!name) return;
     const p=document.getElementById('k-p').value, c=p==='contrib'?0:+document.getElementById('k-c').value, opt=document.getElementById('k-opt').checked;
     const id=e.target.dataset.id;
-    if(id) Object.assign(S[id],{name,p,c,opt});
+    if(id){ if(S[id].c!==c) delete S[id].c2; Object.assign(S[id],{name,p,c,opt}); }
     else {const nid='k'+Date.now(), sk={p,id:nid,name,c,opt}; SKILLS.push(sk); S[nid]=sk; students.forEach(st=>st.levels[nid]=0);}
     refOpen.add(p==='contrib'?'contrib':'c'+c);
     closeSheet(); toast(id?'Compétence modifiée':'Compétence ajoutée'); keep(); return}

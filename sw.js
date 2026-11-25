@@ -1,7 +1,7 @@
 /* Service worker : l'appli s'ouvre sans réseau (gymnase, salle sans wifi).
    Fichiers de l'appli : servis depuis le cache, puis mis à jour en arrière-plan.
    Changer CACHE à chaque mise en ligne pour forcer le renouvellement. */
-const CACHE = 'rds-v1.5.2';
+const CACHE = 'rds-v1.6.0';
 const SHELL = [
   './', './index.html', './css/app.css', './js/store.js', './js/firebase-config.js', './js/sync.js', './js/app.js', './manifest.webmanifest',
   './icons/logo-groupe.png', './icons/logo-asso.png', './icons/icon-192.png', './icons/icon-512.png',
