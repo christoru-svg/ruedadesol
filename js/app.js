@@ -1,7 +1,7 @@
 /* Rueda de Sol — suivi des élèves. Une seule page, rendue en JS sans dépendance. */
 'use strict';
 /* ---------- Référentiels ---------- */
-const APP_VERSION='1.7.0';
+const APP_VERSION='1.7.1';
 const SCRIPT_BASE=document.currentScript?document.currentScript.src:location.href;
 const TODAY = new Date(); TODAY.setHours(12,0,0,0);
 const isoDay=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
@@ -162,11 +162,19 @@ const sess=id=>sessions.find(s=>s.id===id);
 function seniority(date){const d=new Date(date);let m=(TODAY.getFullYear()-d.getFullYear())*12+TODAY.getMonth()-d.getMonth();const y=Math.floor(m/12);m%=12;
   return (y?y+(y>1?' ans':' an'):'')+(y&&m?' ':'')+(m?m+' mois':'')||'Ce mois-ci'}
 const fmt=d=>new Date(d+'T12:00:00').toLocaleDateString('fr-FR',{day:'numeric',month:'short'});
-/* Anniversaire : date de naissance facultative (AAAA-MM-JJ). */
-function bdayIn(st){ if(!st.naissance) return null; const [,m,d]=st.naissance.split('-').map(Number);
+/* Anniversaire : jour et mois seulement, facultatif (MM-JJ ; une ancienne valeur AAAA-MM-JJ est lue aussi). */
+const MONTHS=['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
+const bdMD=st=>st.naissance?st.naissance.slice(-5).split('-').map(Number):null;
+function bdayIn(st){ const md=bdMD(st); if(!md) return null; const [m,d]=md;
   let n=new Date(TODAY.getFullYear(),m-1,d,12); if(n<new Date(TODAY.getFullYear(),TODAY.getMonth(),TODAY.getDate(),0)) n=new Date(TODAY.getFullYear()+1,m-1,d,12);
-  return {days:Math.round((n-new Date(TODAY.getFullYear(),TODAY.getMonth(),TODAY.getDate(),12))/864e5),date:n,age:n.getFullYear()-(+st.naissance.slice(0,4))}; }
-const bdayTxt=st=>{const b=bdayIn(st);if(!b)return '';return `Anniversaire le ${new Date(st.naissance+'T12:00:00').toLocaleDateString('fr-FR',{day:'numeric',month:'long'})} (${b.age-(b.days?1:0)} ans)`};
+  return {days:Math.round((n-new Date(TODAY.getFullYear(),TODAY.getMonth(),TODAY.getDate(),12))/864e5),date:n}; }
+const bdayTxt=st=>{const md=bdMD(st);if(!md)return '';return `Anniversaire le ${md[1]===1?'1er':md[1]} ${MONTHS[md[0]-1]}`};
+function bdayField(pre,st){const md=st&&bdMD(st);
+  return `<fieldset class="field" style="border:0;padding:0;margin:0"><legend style="font-size:0.8125rem;font-weight:600;color:var(--muted);padding:0;margin-bottom:5px">Anniversaire (facultatif)</legend>
+    <div class="row" style="gap:8px"><select class="input" id="${pre}-bdd" aria-label="Jour" style="flex:1"><option value="">Jour</option>${Array.from({length:31},(_,i)=>`<option value="${i+1}"${md&&md[1]===i+1?' selected':''}>${i+1}</option>`).join('')}</select>
+    <select class="input" id="${pre}-bdm" aria-label="Mois" style="flex:2"><option value="">Mois</option>${MONTHS.map((m,i)=>`<option value="${i+1}"${md&&md[0]===i+1?' selected':''}>${m}</option>`).join('')}</select></div></fieldset>`}
+const readBday=pre=>{const d=+document.getElementById(pre+'-bdd').value,m=+document.getElementById(pre+'-bdm').value;
+  if(!d||!m) return null; const max=[31,29,31,30,31,30,31,31,30,31,30,31][m-1]; return String(m).padStart(2,'0')+'-'+String(Math.min(d,max)).padStart(2,'0')};
 const fmtL=d=>new Date(d+'T12:00:00').toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long'});
 const done=()=>sessions.filter(s=>s.done).sort((a,b)=>a.date.localeCompare(b.date));
 function presences(st){return done().filter(s=>s.present.includes(st.id))}
@@ -598,7 +606,7 @@ function home(){
   ${(()=>{const bd=students.filter(s=>s.status!=='pause').map(s=>({s,b:bdayIn(s)})).filter(x=>x.b&&x.b.days<=7).sort((a,b)=>a.b.days-b.b.days);
     return bd.length?`<section class="stale bday" role="note">
     <span class="row" style="gap:8px"><span class="pill warn">Anniversaire</span><span style="font-size:.875rem">${bd.length>1?bd.length+' cette semaine':'Cette semaine'}</span></span>
-    ${bd.map(({s,b})=>`<button class="adv-row ready-row" data-act="student" data-id="${s.id}">${avatar(s)}<div class="grow"><div class="title">${esc(s.apelido)}</div><div class="sub">${b.days===0?"Aujourd'hui":b.days===1?'Demain':cap(b.date.toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long'}))} · ${b.age} ans</div></div></button>`).join('')}
+    ${bd.map(({s,b})=>`<button class="adv-row ready-row" data-act="student" data-id="${s.id}">${avatar(s)}<div class="grow"><div class="title">${esc(s.apelido)}</div><div class="sub">${b.days===0?"Aujourd'hui":b.days===1?'Demain':cap(b.date.toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long'}))}</div></div></button>`).join('')}
   </section>`:''})()}
   ${ready.length?`<section class="stale" role="note">
     <span class="row" style="gap:8px"><span class="pill warn">Corde</span><span style="font-size:.875rem">${ready.length>1?`${ready.length} élèves peuvent changer de corde`:'Un·e élève peut changer de corde'}</span></span>
@@ -856,7 +864,7 @@ function studentSheet(id){
     <div class="field"><label for="s-nom">Prénom et nom</label><input class="input" id="s-nom" value="${esc(st.nom)}" required></div>
     ${st.photo?`<div class="photo-field">${avatar(st)}<span class="muted" style="flex:1;font-size:0.8125rem">Pour changer la photo, touche-la sur la fiche.</span><button type="button" class="btn ghost" style="color:var(--red)" data-act="rmphoto" data-id="${id}">Retirer la photo</button></div>`:''}
     <div class="field"><label for="s-dt">Date d'arrivée</label><input class="input" type="date" id="s-dt" value="${st.arrivee}" required></div>
-    <div class="field"><label for="s-bd">Date de naissance (facultatif)</label><input class="input" type="date" id="s-bd" value="${st.naissance||''}" max="${TODAY_ISO}"></div>
+    ${bdayField('s',st)}
     <fieldset style="border:0;padding:0;margin:0;display:flex;flex-direction:column;gap:5px"><legend style="font-size:0.8125rem;font-weight:600;color:var(--muted);padding:0;margin-bottom:5px">Statut</legend>
       <div class="seg">${Object.entries(STATUS).map(([k,l])=>`<label class="segopt"><input type="radio" name="s-status" value="${k}"${(st.status||'actif')===k?' checked':''}>${l}</label>`).join('')}</div>
       <span class="muted" style="font-size:0.8125rem">En pause : reste dans la liste, sort de l'appel et des relances. Inactif : sort de la liste et de l'appel, rien n'est effacé.</span></fieldset>
@@ -891,7 +899,7 @@ function addSheet(){
     <div class="field"><label for="f-ap">Apelido</label><input class="input" id="f-ap" placeholder="Laisser vide s'il n'a pas encore été baptisé"></div>
     <div class="field"><label for="f-nom">Prénom et nom</label><input class="input" id="f-nom" required></div>
     <div class="field"><label for="f-dt">Date d'arrivée</label><input class="input" type="date" id="f-dt" value="${TODAY_ISO}" required></div>
-    <div class="field"><label for="f-bd">Date de naissance (facultatif)</label><input class="input" type="date" id="f-bd" max="${TODAY_ISO}"></div>
+    ${bdayField('f')}
     <div class="field"><label for="f-c">Corde actuelle</label><select class="input" id="f-c">${CORDAS.map((c,i)=>`<option value="${i}">${cordaName(i)}</option>`).join('')}</select></div>
     <div class="btns"><button type="button" class="btn" data-act="close">Annuler</button><button class="btn primary" type="submit">Ajouter</button></div>
   </form>`);
@@ -1000,7 +1008,7 @@ document.addEventListener('submit',e=>{
   if(e.target.id==='importform'){ if(!pendingImport) return; applyState(pendingImport); pendingImport=null; closeSheet(false); toast('Sauvegarde importée'); go('home'); return}
   if(e.target.id==='stform'){
     const st=byId(e.target.dataset.id), ap=document.getElementById('s-ap').value.trim(), nom=document.getElementById('s-nom').value.trim();
-    if(!ap||!nom) return; Object.assign(st,{apelido:ap,nom,arrivee:document.getElementById('s-dt').value,naissance:document.getElementById('s-bd').value||null});
+    if(!ap||!nom) return; Object.assign(st,{apelido:ap,nom,arrivee:document.getElementById('s-dt').value,naissance:readBday('s')});
     const was=st.status||'actif', ns=document.querySelector('input[name="s-status"]:checked').value; setStatus(st,ns,document.getElementById('s-snote').value.trim());
     closeSheet(); toast(ns!==was?`${st.apelido} : ${STATUS[ns].toLowerCase()}`:'Fiche mise à jour'); keep(); return}
   if(e.target.id==='batform'){
@@ -1020,7 +1028,7 @@ document.addEventListener('submit',e=>{
     st.contribs.push({date:document.getElementById('c-dt').value,text});closeSheet();toast('Contribution notée');keep();return}
   const nom=document.getElementById('f-nom').value.trim(); if(!nom) return;
   const ap=document.getElementById('f-ap').value.trim()||nom.split(' ')[0];
-  const st={id:'e'+Date.now(),apelido:ap,nom,arrivee:document.getElementById('f-dt').value,naissance:document.getElementById('f-bd').value||null,corda:+document.getElementById('f-c').value,levels:Object.fromEntries(SKILLS.map(s=>[s.id,0])),hist:[],assid:.8,color:AV[students.length%AV.length],notes:'',contribs:[],since:{},lvlHist:[]}; if(pendingPhoto){st.photo=pendingPhoto;pendingPhoto=null}
+  const st={id:'e'+Date.now(),apelido:ap,nom,arrivee:document.getElementById('f-dt').value,naissance:readBday('f'),corda:+document.getElementById('f-c').value,levels:Object.fromEntries(SKILLS.map(s=>[s.id,0])),hist:[],assid:.8,color:AV[students.length%AV.length],notes:'',contribs:[],since:{},lvlHist:[]}; if(pendingPhoto){st.photo=pendingPhoto;pendingPhoto=null}
   students.push(st); closeSheet(false); toast(`${ap} ajouté·e`); go('student',{id:st.id}); tab='students'; render();
 });
 // Flèches pour changer de niveau dans un groupe de boutons radio
